@@ -1,0 +1,240 @@
+---
+title: "Assignment 3"
+author: "Dans Lismanis"
+date: "2023-10-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Practical Questions:
+## Question 1:
+### a)
+Quantiles for HHLarge:
+```{r}
+df=read.csv("oj.csv")
+quantile(df$HHLARGE)
+```
+Mean:
+```{r}
+mean(df$HHLARGE)
+```
+Quantiles for HHLarge:
+```{r}
+df=read.csv("oj.csv")
+quantile(df$EDUC)
+```
+Mean:
+```{r}
+mean(df$EDUC)
+```
+
+### b)
+
+#### I)
+
+```{r}
+lp=log(df$price)
+library(fastDummies)
+df=dummy_cols(df, select_columns ='brand')
+df$featdom=df$feat*df$brand_dominicks
+df$featminu=df$feat*df$brand_minute.maid
+df$feattro=df$feat*df$brand_tropicana
+
+df$dom_lp=lp*df$brand_dominicks
+df$min_lp=lp*df$brand_minute.maid
+df$tro_lp=lp*df$brand_tropicana
+
+reg9a=lm(logmove~ lp+min_lp+tro_lp+featdom+featminu+feattro+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150, data=df)
+summary(reg9a)
+CoefH=coef(reg9a)['HHLARGE']
+CoefH
+medH=median(df$HHLARGE)
+thirdqH=quantile(df$HHLARGE,0.75)
+deltalogq=CoefH*(thirdqH-medH)
+deltalogq
+```
+
+#### II)
+
+```{r}
+CoefE=coef(reg9a)["EDUC"]
+medE=median(df$EDUC)
+thirdqE=quantile(df$EDUC,0.75)
+deltalogqE=CoefE*(thirdqE-medE)
+deltalogqE
+```
+
+#### III)
+
+The absolute value of change is greater for HHLARGE so we conclude that this is the more important predictor of demand.
+
+### c)
+
+#### I)
+
+```{r}
+df$EDUC_lp=df$EDUC*lp
+df$HHLARGE_lp=df$HHLARGE*lp
+reg1c=lm(logmove ~ lp+min_lp+tro_lp+featdom+featminu+feattro+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150+EDUC_lp+HHLARGE_lp, data=df)
+summary(reg1c)
+```
+
+#### II)
+
+Yes, these coefficients make sense as when a household is large and the price of the product is increased the demand for it drops significantly. As the bigger the hausehold is the more they would feel the impact of price change.
+
+#### III)
+
+After adding interaction therms the coefficients of EDUC and HHLARGE increased in absolute value, the signs of the coefficients have changed.
+
+#### IV)
+
+```{r}
+elmedH=coef(reg1c)["HHLARGE"]*(medH/median(df$logmove))
+elmedE=coef(reg1c)["EDUC"]*(medE/median(df$logmove))
+el75H=coef(reg1c)["HHLARGE"]*(thirdqH/median(df$logmove))
+el75E=coef(reg1c)["EDUC"]*(thirdqE/median((df$logmove)))
+deltaE=((el75E-elmedE)/elmedE)
+deltaH=(el75H-elmedH)/elmedH
+deltaE
+deltaH
+```
+Education is more important as the percentage change is higher.
+
+### d)
+Although the coefficient of HHLarge is positive, the interation term HHLARGE_lp has a even greater negetive effect, this negative effect of the interaction term outweighs the positive sign of HHLARGE. So this can be seen as if we compare a small house hold, to a large one, ceteris paribus, the demand increases by 2.79%. But if we increase the price by 1% the demand of a large hause hold would decrease by 5.78%.
+
+## Question 2
+### a)
+```{r}
+df1=df
+df1$week=df1$week+1
+df2=merge(df,df1, by=c("brand","store","week"))
+colnames(df2)[colnames(df2)=="price.y"]="LagPrice"
+colnames(df2)[colnames(df2)=="price.x"]="Price"
+df2$LnPrice=log(df2$Price)
+df2$LnLagPrice=log(df2$LagPrice)
+```
+
+### b)
+```{r}
+reg2b=lm(logmove.x~LnPrice+LnLagPrice,data=df2)
+summary(reg2b)
+```
+We can see that the estimated coefficient of logorith of last weeks price is positive, this indicates that an increase of price in the previous week leads to a increase of demand this week. This makes sales more attractive, as increase of the price last week does not lead to decrease of sales this week.
+
+## Question 3
+### a)
+```{r}
+library(fastDummies)
+df2=dummy_cols(df2, select_columns ='brand')
+df2$min_lp=df2$brand_dominicks*df2$LnPrice
+df2$min_laglp=df2$brand_dominicks*df2$LnLagPrice
+df2$tro_lp=df2$brand_tropicana*df2$LnPrice
+df2$tro_laglp=df2$brand_tropicana*df2$LnLagPrice
+df2$EDUC_lp=df2$EDUC.x*df2$LnPrice
+df2$HHLarge_lp=df2$HHLARGE.x*df2$LnPrice
+sampsize=nrow(df2)/5
+all=1:nrow(df2)
+inc=c(1:sampsize,(sampsize+1):(2*sampsize),(2*sampsize+1):(3*sampsize),(3*sampsize+1):(4*sampsize),(4*sampsize+1):(nrow(df2)))
+indices=sample(1:nrow(df2))
+part1=df2[indices[1:sampsize],]
+part2=df2[indices[(sampsize+1):(2*sampsize)],]
+part3=df2[indices[(2*sampsize+1):(3*sampsize)],]
+part4=df2[indices[(3*sampsize+1):(4*sampsize)],]
+part5=df2[indices[(4*sampsize+1):(nrow(df2))],]
+```
+### b)
+```{r}
+
+train1=rbind(part2,part3,part4,part5)
+test1=part1
+train2=rbind(part1,part3,part4,part5)
+test2=part2
+train3=rbind(part1,part2,part4,part5)
+test3=part3
+train4=rbind(part1,part2,part3,part5)
+test4=part4
+train5=rbind(part1,part2,part3,part4)
+test5=part5
+
+```
+### c)
+```{r}
+train1reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=train1)
+MSE_train1=mean((train1$logmove.x-predict(train1reg))^2)
+MSE_train1
+
+test1reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=test1)
+MSE_test1=mean((test1$logmove.x-predict(test1reg))^2)
+MSE_test1
+
+train2reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=train2)
+MSE_train2=mean((train2$logmove.x-predict(train2reg))^2)
+MSE_train2
+
+test2reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=test2)
+MSE_test2=mean((test2$logmove.x-predict(test2reg))^2)
+MSE_test2
+
+train3reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=train3)
+MSE_train3=mean((train3$logmove.x-predict(train3reg))^2)
+MSE_train3
+
+test3reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=test3)
+MSE_test3=mean((test3$logmove.x-predict(test3reg))^2)
+MSE_test3
+
+train4reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=train4)
+MSE_train4=mean((train4$logmove.x-predict(train4reg))^2)
+MSE_train4
+
+test4reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=test4)
+MSE_test4=mean((test4$logmove.x-predict(test4reg))^2)
+MSE_test4
+
+train5reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=train5)
+MSE_train5=mean((train5$logmove.x-predict(train5reg))^2)
+MSE_train5
+
+test5reg=lm(logmove.x~ LnPrice+LnLagPrice+min_lp+min_laglp+tro_lp+tro_laglp+feat.x+brand_minute.maid+brand_tropicana+AGE60.x+EDUC.x+EDUC_lp.x+ETHNIC.x+INCOME.x+HHLARGE.x+HHLARGE_lp.x+WORKWOM.x+HVAL150.x, data=test5)
+MSE_test5=mean((test5$logmove.x-predict(test5reg))^2)
+MSE_test5
+
+avgMSE=(MSE_test1+MSE_train1+MSE_test2+MSE_train2+MSE_test3+MSE_train3+MSE_test4+MSE_train4+MSE_test5+MSE_train5)/10
+avgMSE
+```
+
+# Theotethical Questions:
+
+## Question 1
+
+### a)
+
+I would regress the quantity sold of orange juice on the price of the orange juice and the quantity sold of bananas.\
+Then I would look at the sign of quantity bananas sold coefficient, if it is positive then they are complements, if negative then substitutes. \
+
+### b) 
+
+The sign of the coefficient would be negative. As they are substitutes you are more likely to bundle them.  \
+
+#### I)
+This is due to the fact that that now you can sell more products, as now the person who only wanted bananas is inclined to buy the bundle with orange juice as well.
+
+
+![](/Users/dans/Downloads/288_3.jpg)
+
+
+#### II)
+
+The price of the bundle would be less than the sum of the two independent prices.
+
+### c)
+
+We are assuming that orange juice and bananas are substitutes. 
+
+This would cause an increase in the quantity sold of the orange juice, but also decrease the sales of bananas as they are substitutes and orange juice is offered at a lower price than usual. 
+
+If we keep the price of the bundle as before it becomes less attractive to the consumer, so we could decrease the price of the bundle consistently with the sale of orange juice to keep it still attractive.

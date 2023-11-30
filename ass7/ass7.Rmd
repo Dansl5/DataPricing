@@ -1,0 +1,260 @@
+---
+title: "Assignment7"
+author: "Dans Lismanis"
+date: "2023-11-13"
+output: html_document
+---
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(xgboost)
+set.seed(69)
+```
+## Question 1
+
+### a
+
+This firm runs the risk of losing the customers with high quality preference.
+
+### b
+1) This firm could produce two types of product, one for the high preference and one for the low preference customers.
+
+2) This firm can do sales to cater to low quality preference which is usually due to the lower price
+
+### c
+
+Denote: PS0 - firms surplus now
+        PS1- firms surplus with price descrimination
+        WP- willingness to pay to identify customers:
+        
+WP<PS1-PS0
+
+## Question 2
+
+### a
+
+#### Creating dataframes:
+
+```{r}
+#Creating dataframes for Dominicks,Minute Maid and Tropicana
+df=read.csv("/Users/dans/Desktop/ECON/assignment1econ/oj.csv")
+dfdom=df[df$brand=='dominicks',]
+dfmin=df[df$brand=="minute.maid",]
+dftro=df[df$brand=="tropicana",]
+
+#Adding cross prices
+dfdom$price=log(dfdom$price)
+dfdom$LnPMin=log(dfmin$price)
+dfdom$LnPTro=log(dftro$price)
+
+dfmin$price=log(dfmin$price)
+dfmin$LnPDom=dfdom$price
+dfmin$LnPTro=log(dftro$price)
+
+dftro$price=log(dftro$price)
+dftro$LnPDom=dfdom$price
+dftro$LnPMin=dfmin$price
+
+# Creating Lags
+df1dom=dfdom
+df1dom$week=df1dom$week+1
+dfdomWL=merge(dfdom,df1dom, by=c("brand","store","week"))
+names(dfdomWL)=c("brand","store","week","logmove","feat","LnPrice","AGE60","EDUC","ETHNIC","INCOME","HHLARGE","WORKWOM","HVAL150","SSTRDIST","SSTRVOL","CPDIST5","CPWVOL5","LnPMin","LnPTro","Laglogmove","Lagfeat","LagLnPrice","LagAGE60","LagEDUC","LagETHNIC","LagINCOME","LagHHLARGE","LagWORKWOM","LagHVAL150","LagSSTRDIST","LagSSTRVOL","LagCPDIST5","LagCPWVOL5","LagLnPMin","LagLnPTro")
+
+df1min=dfmin
+df1min$week=df1min$week+1
+dfminWL=merge(dfmin,df1min, by=c("brand","store","week"))
+names(dfminWL)=c("brand","store","week","logmove","feat","LnPrice","AGE60","EDUC","ETHNIC","INCOME","HHLARGE","WORKWOM","HVAL150","SSTRDIST","SSTRVOL","CPDIST5","CPWVOL5","LnPDom","LnPTro","Laglogmove","Lagfeat","LagLnPrice","LagAGE60","LagEDUC","LagETHNIC","LagINCOME","LagHHLARGE","LagWORKWOM","LagHVAL150","LagSSTRDIST","LagSSTRVOL","LagCPDIST5","LagCPWVOL5","LagLnPDom","LagLnPTro")
+
+df1tro=dftro
+df1tro$week=df1tro$week+1
+dftroWL=merge(dftro,df1tro, by=c("brand","store","week"))
+names(dftroWL)=c("brand","store","week","logmove","feat","LnPrice","AGE60","EDUC","ETHNIC","INCOME","HHLARGE","WORKWOM","HVAL150","SSTRDIST","SSTRVOL","CPDIST5","CPWVOL5","LnPDom","LnPMin","Laglogmove","Lagfeat","LagLnPrice","LagAGE60","LagEDUC","LagETHNIC","LagINCOME","LagHHLARGE","LagWORKWOM","LagHVAL150","LagSSTRDIST","LagSSTRVOL","LagCPDIST5","LagCPWVOL5","LagLnPDom","LagLnPMin")
+```
+
+```{r}
+#creating interactions:
+dfdomWL$pAGE=dfdomWL$LagLnPrice*dfdomWL$LagAGE60
+dfdomWL$pEDU=dfdomWL$LagLnPrice*dfdomWL$LagEDUC
+dfdomWL$pETHNIC=dfdomWL$LagLnPrice*dfdomWL$LagETHNIC
+dfdomWL$pWORKWOM=dfdomWL$LagLnPrice*dfdomWL$LagWORKWOM
+dfdomWL$pHHLARGE=dfdomWL$LagLnPrice*dfdomWL$LagHHLARGE
+
+dfminWL$pAGE=dfminWL$LagLnPrice*dfminWL$LagAGE60
+dfminWL$pEDU=dfminWL$LagLnPrice*dfminWL$LagEDUC
+dfminWL$pETHNIC=dfminWL$LagLnPrice*dfminWL$LagETHNIC
+dfminWL$pWORKWOM=dfminWL$LagLnPrice*dfminWL$LagWORKWOM
+dfminWL$pHHLARGE=dfminWL$LagLnPrice*dfminWL$LagHHLARGE
+
+dftroWL$pAGE=dftroWL$LagLnPrice*dftroWL$LagAGE60
+dftroWL$pEDU=dftroWL$LagLnPrice*dftroWL$LagEDUC
+dftroWL$pETHNIC=dftroWL$LagLnPrice*dftroWL$LagETHNIC
+dftroWL$pWORKWOM=dftroWL$LagLnPrice*dftroWL$LagWORKWOM
+dftroWL$pHHLARGE=dftroWL$LagLnPrice*dftroWL$LagHHLARGE
+```
+
+#### For Dominicks:
+
+Predicting Price And Quantity based on lagged variables:
+```{r}
+set.seed(69)
+#For dominicks Price:
+selcindex=sample(seq_len(nrow(dfdomWL)),size=(0.5*nrow(dfdomWL)),replace = FALSE)
+dfdomWLTrain=dfdomWL[selcindex,]
+dfdomWLTest=dfdomWL[-selcindex,]
+formPricedom= LnPrice ~ week + store + Laglogmove+ Lagfeat +LagLnPrice + LagAGE60 + LagEDUC + LagETHNIC + LagINCOME + LagHHLARGE + LagWORKWOM + LagHVAL150 + LagSSTRDIST + LagSSTRVOL + LagCPDIST5 + LagCPWVOL5 + LagLnPMin + LagLnPTro + pAGE + pEDU + pETHNIC + pWORKWOM + pHHLARGE
+PriceDomMTrain=model.matrix(formPricedom,data=dfdomWLTrain)
+PriceDomMTest=model.matrix(formPricedom,data=dfdomWLTest)
+PriceDomDM=xgb.DMatrix(data=PriceDomMTrain, label=dfdomWLTrain$LnPrice)
+crossvPdom=xgb.cv(data=PriceDomDM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPDom=xgboost(data=PriceDomDM, nrounds=189, print_every_n = 150)
+predictedPDom=predict(XGBPDom,newdata=PriceDomMTest)
+residualsPDom=dfdomWLTest$LnPrice-predictedPDom
+```
+
+```{r}
+set.seed(69)
+#Finding residuals of Dom on LogMove:
+formmovedom= LnPrice ~ week + store + Laglogmove+ Lagfeat +LagLnPrice + LagAGE60 + LagEDUC + LagETHNIC + LagINCOME + LagHHLARGE + LagWORKWOM + LagHVAL150 + LagSSTRDIST + LagSSTRVOL + LagCPDIST5 + LagCPWVOL5 + LagLnPMin + LagLnPTro + pAGE + pEDU + pETHNIC + pWORKWOM + pHHLARGE
+MoveDomMTrain=model.matrix(formmovedom,data=dfdomWLTrain)
+MoveDomMTest=model.matrix(formmovedom,data=dfdomWLTest)
+MoveDomDM=xgb.DMatrix(data=MoveDomMTrain, label=dfdomWLTrain$logmove)
+crossvPdom=xgb.cv(data=MoveDomDM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBQDom=xgboost(data=MoveDomDM, nrounds=246, print_every_n = 150)
+predictedQDom=predict(XGBQDom,newdata=MoveDomMTest)
+residualsQDom=dfdomWLTest$logmove-predictedQDom
+```
+
+OLS of resdPrice on resdQuan
+```{r}
+DomRes=data.frame(
+  ResdLnMove=residualsQDom,
+  ResdLnPrice=residualsPDom
+)
+DomResQuanOnPrice=lm(residualsQDom~residualsPDom,data=DomRes)
+summary(DomResQuanOnPrice)
+```
+
+#### For Minute Maid:
+
+Predicting Price And Quantity based on lagged variables:
+```{r}
+set.seed(69)
+#For Minute Maid Price:
+selcindex=sample(seq_len(nrow(dfminWL)),size=(0.5*nrow(dfminWL)),replace = FALSE)
+dfminWLTrain=dfminWL[selcindex,]
+dfminWLTest=dfminWL[-selcindex,]
+formPricemin= LnPrice ~ week + store + Laglogmove+ Lagfeat +LagLnPrice + LagAGE60 + LagEDUC + LagETHNIC + LagINCOME + LagHHLARGE + LagWORKWOM + LagHVAL150 + LagSSTRDIST + LagSSTRVOL + LagCPDIST5 + LagCPWVOL5 + LagLnPDom + LagLnPTro + pAGE + pEDU + pETHNIC + pWORKWOM + pHHLARGE
+PriceminMTrain=model.matrix(formPricemin,data=dfminWLTrain)
+PriceminMTest=model.matrix(formPricemin,data=dfminWLTest)
+PriceminDM=xgb.DMatrix(data=PriceminMTrain, label=dfminWLTrain$LnPrice)
+crossvPmin=xgb.cv(data=PriceminDM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPmin=xgboost(data=PriceminDM, nrounds=255, print_every_n = 150)
+predictedPmin=predict(XGBPmin,newdata=PriceminMTest)
+residualsPmin=dfminWLTest$LnPrice-predictedPmin
+```
+
+```{r}
+set.seed(69)
+#Finding residuals of Minute Maid on LogMove:
+formmovemin= LnPrice ~ week + store + Laglogmove+ Lagfeat +LagLnPrice + LagAGE60 + LagEDUC + LagETHNIC + LagINCOME + LagHHLARGE + LagWORKWOM + LagHVAL150 + LagSSTRDIST + LagSSTRVOL + LagCPDIST5 + LagCPWVOL5 + LagLnPDom + LagLnPTro + pAGE + pEDU + pETHNIC + pWORKWOM + pHHLARGE
+MoveminMTrain=model.matrix(formmovemin,data=dfminWLTrain)
+MoveminMTest=model.matrix(formmovemin,data=dfminWLTest)
+MoveminDM=xgb.DMatrix(data=MoveminMTrain, label=dfminWLTrain$logmove)
+crossvPmin=xgb.cv(data=MoveminDM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBQmin=xgboost(data=MoveminDM, nrounds=241, print_every_n = 150)
+predictedQmin=predict(XGBQmin,newdata=MoveminMTest)
+residualsQmin=dfminWLTest$logmove-predictedQmin
+```
+
+```{r}
+minRes=data.frame(
+  ResdLnMove=residualsQmin,
+  ResdLnPrice=residualsPmin
+)
+minResQuanOnPrice=lm(residualsQmin~residualsPmin,data=minRes)
+summary(minResQuanOnPrice)
+```
+
+#### For Tropicana:
+
+Predicting Price And Quantity based on lagged variables:
+```{r}
+set.seed(69)
+#For Tropicana Price:
+selcindex=sample(seq_len(nrow(dftroWL)),size=(0.5*nrow(dftroWL)),replace = FALSE)
+dftroWLTrain=dftroWL[selcindex,]
+dftroWLTest=dftroWL[-selcindex,]
+formPricetro= LnPrice ~ week + store + Laglogmove+ Lagfeat +LagLnPrice + LagAGE60 + LagEDUC + LagETHNIC + LagINCOME + LagHHLARGE + LagWORKWOM + LagHVAL150 + LagSSTRDIST + LagSSTRVOL + LagCPDIST5 + LagCPWVOL5 + LagLnPDom + LagLnPMin + pAGE + pEDU + pETHNIC + pWORKWOM + pHHLARGE
+PricetroMTrain=model.matrix(formPricetro,data=dftroWLTrain)
+PricetroMTest=model.matrix(formPricetro,data=dftroWLTest)
+PricetroDM=xgb.DMatrix(data=PricetroMTrain, label=dftroWLTrain$LnPrice)
+crossvPtro=xgb.cv(data=PricetroDM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPtro=xgboost(data=PricetroDM, nrounds=242, print_every_n = 150)
+predictedPtro=predict(XGBPtro,newdata=PricetroMTest)
+residualsPtro=dftroWLTest$LnPrice-predictedPtro
+```
+
+```{r}
+set.seed(69)
+#Finding residuals of Tropicana on LogMove:
+formmovetro= LnPrice ~ week + store + Laglogmove+ Lagfeat +LagLnPrice + LagAGE60 + LagEDUC + LagETHNIC + LagINCOME + LagHHLARGE + LagWORKWOM + LagHVAL150 + LagSSTRDIST + LagSSTRVOL + LagCPDIST5 + LagCPWVOL5 + LagLnPDom + LagLnPMin + pAGE + pEDU + pETHNIC + pWORKWOM + pHHLARGE
+MovetroMTrain=model.matrix(formmovetro,data=dftroWLTrain)
+MovetroMTest=model.matrix(formmovetro,data=dftroWLTest)
+MovetroDM=xgb.DMatrix(data=MovetroMTrain, label=dftroWLTrain$logmove)
+crossvPtro=xgb.cv(data=MovetroDM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBQtro=xgboost(data=MovetroDM, nrounds=112, print_every_n = 150)
+predictedQtro=predict(XGBQtro,newdata=MovetroMTest)
+residualsQtro=dftroWLTest$logmove-predictedQtro
+```
+
+```{r}
+troRes=data.frame(
+  ResdLnMove=residualsQtro,
+  ResdLnPrice=residualsPtro
+)
+troResQuanOnPrice=lm(residualsQtro~residualsPtro,data=troRes)
+summary(troResQuanOnPrice)
+```
+
+### b
+```{r}
+#creating a dataframe with all residuals:
+dfresiduals=data.frame(
+  LnMoveDom=residualsQDom,
+  LnPriceDom=residualsPDom,
+  LnMoveMin=residualsQmin,
+  LnPriceMin=residualsPmin,
+  LnMoveTro=residualsQtro,
+  LnPriceTro=residualsPtro
+  
+)
+```
+
+```{r}
+#OLS regresion for Dom:
+regcrossdom=lm(LnMoveDom~LnPriceDom+LnPriceMin+LnPriceTro,data=dfresiduals)
+summary(regcrossdom)
+```
+
+```{r}
+#OLS regresion for Min:
+regcrossmin=lm(LnMoveMin~LnPriceDom+LnPriceMin+LnPriceTro,data=dfresiduals)
+summary(regcrossmin)
+```
+
+```{r}
+#OLS regresion for Dom:
+regcrosstro=lm(LnMoveTro~LnPriceDom+LnPriceMin+LnPriceTro,data=dfresiduals)
+summary(regcrosstro)
+```
+
+```{r}
+#Creating Matrix:
+cmat=matrix(coef(regcrossdom),nrow=1)
+cmat=rbind(cmat,coef(regcrossmin))
+cmat=rbind(cmat,coef(regcrosstro))
+cmat=cmat[,-1]
+rownames(cmat)=c("LnPriceDom","LnPriceMin","LnPriceTro")
+cmat
+```

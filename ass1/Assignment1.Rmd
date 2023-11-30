@@ -1,0 +1,42 @@
+---
+title: "Assignment 1"
+author: "Dans Lismanis"
+date: "2023-09-29"
+output: html_document
+---
+
+Question1a
+
+When a firm lowers its price it loses money on the intensive margin and gains on the extensive margin this is due to the fact that quantity of products sold lowers, but they are sold at a higher price.
+
+Question1b
+
+When a firm increases it's price they gain money on the intensive margin and lose money on the extensive margin, this is due to the increase of products sold.
+
+Question2a
+\begin{align*}
+Q=4-(1/3)\\
+(1/3)P=4-Q\\
+P=12-3Q 
+\end{align*}
+
+Question2b
+
+```{r}
+# Define the function
+f <- function(x) {
+  return(12 - 3*x)
+}
+
+# Create a sequence of x values
+x <- seq(0, 4, by = 1)
+
+# Calculate the corresponding y values using the function
+y <- f(x)
+
+# Create the plot
+plot(x, y, type = "l", col = "blue", xlab = "Quantity", ylab = "Price", main = "Graph of the inverse demand curve")
+```
+
+Question 2c
+

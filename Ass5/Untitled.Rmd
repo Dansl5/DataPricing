@@ -1,0 +1,60 @@
+---
+title: "HW5"
+author: "Dans Lismanis"
+date: "2023-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question 2
+
+### a)
+
+```{r}
+df=read.csv("/Users/dans/Desktop/ECON/econ_assignment_4/oj.csv")
+domdf=df[df$brand=="dominicks",]
+q=quantile(domdf$INCOME)
+mmdf=df[df$brand=="minute.maid",]
+trodf=df[df$brand=="tropicana",]
+P_MM=mmdf$price
+P_Trop=trodf$price
+domdf['lnP_MM']=log(P_MM)
+domdf['lnP_Trop']=log(P_Trop)
+domdf['lnP_Dom']=log(domdf$price)
+q
+```
+
+### b)
+```{r}
+domdf1=subset(domdf,INCOME<=q[2])
+domdf2=subset(domdf,INCOME<=q[3] & INCOME>q[2])
+domdf3=subset(domdf,INCOME<=q[4] & INCOME>q[3])
+domdf4=subset(domdf,INCOME<=q[5] & INCOME>q[4])
+mean(domdf1$logmove)
+mean(domdf2$logmove)
+mean(domdf3$logmove)
+mean(domdf4$logmove)
+```
+
+### c)
+
+```{r}
+
+q1reg=lm(logmove~lnP_Dom*feat+lnP_MM+lnP_Trop+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150+SSTRDIST+SSTRVOL+CPDIST5+CPWVOL5,data=domdf1)
+q2reg=lm(logmove~lnP_Dom*feat+lnP_MM+lnP_Trop+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150+SSTRDIST+SSTRVOL+CPDIST5+CPWVOL5,data=domdf2)
+q3reg=lm(logmove~lnP_Dom*feat+lnP_MM+lnP_Trop+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150+SSTRDIST+SSTRVOL+CPDIST5+CPWVOL5,data=domdf3)
+q4reg=lm(logmove~lnP_Dom*feat+lnP_MM+lnP_Trop+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150+SSTRDIST+SSTRVOL+CPDIST5+CPWVOL5,data=domdf4)
+
+
+MSE1=mean((predict(q1reg)-domdf1$logmove)^2)
+MSE2=mean((predict(q2reg)-domdf2$logmove)^2)
+MSE3=mean((predict(q3reg)-domdf3$logmove)^2)
+MSE4=mean((predict(q4reg)-domdf4$logmove)^2)
+MSE1
+MSE2
+MSE3
+MSE4
+```

@@ -1,0 +1,230 @@
+---
+title: "Introduction to RMarkdown and `dplyr`"
+author: "Lukas Hager & Jacob LaRiviere"
+date: "`r Sys.Date()`"
+output: html_document # this dictates what format you knit to; for this class, HTML is good
+---
+
+___
+
+In ECON 487, you'll be submitting your homework solutions using Markdown files. RMarkdown is a useful choice in our context because it allows you to easily combine general word processing capabilities (the Markdown component) with code chunks and results (the R component). 
+
+## Knitting
+
+To create a HTML version of the RMarkdown file you're working on in your RStudio, you need to knit it -- you can either click "knit" at the top of the pane, or you can use the shortcut <kbd>CMD</kbd><kbd>SHIFT</kbd><kbd>K</kbd> on Mac and <kbd>CTRL</kbd><kbd>SHIFT</kbd><kbd>K</kbd> on PC.
+
+**Please submit your homeworks as knitted HTML files and not `.Rmd` RMarkdown files! If your homework does not knit, you have a code error that should be resolved prior to submission**.
+
+## Troubleshooting
+
+When you run into errors, here's what you should do (listed in the order in which you should do them)
+
+1. Consult the other members of your group -- it's very likely that someone else has hit this problem, and already figured out how to deal with it.
+2. Consult the internet. Just copy/paste your error into Google and see which pages show up. People have been using computers for a long time, and the probability that you're the very first person to encounter this issue is exceedingly low. Leverage the questions of others.
+3. Come to (Lukas's) office hours and ask questions! I'm happy to help you try to debug code.
+
+___
+
+4. Email Lukas with a code question. Full disclosure: the *very first* thing I will do is plug your question into Google and if I see a plausible solution on StackOverflow, I will respond with that link -- please take this as a gentle reminder that (2) is often sufficient as a solution. 
+5. **Do not email Jacob with code or homework questions**.
+
+## Installing Packages
+
+The first thing we're going to do is set up our environment and import some useful packages. This should always be at the top of your file. These little bits of R code are called "chunks".
+
+One note on using libraries in R: you should install them **once** (ideally using the console) and then import them in your code. The syntax for installing is
+
+```
+install.packages("package_name")
+```
+
+For the purposes of this file, running the following code should suffice:
+
+```
+install.packages(c('janitor', 'knitr', 'lubridate', 'scales', 'tidyverse'))
+```
+
+## Librarying Packages
+
+Once you've successfully installed the packages below, the following chunk should run for you.
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE) # sets default behavior to include code in the HTML file, please keep
+
+rm(list = ls()) # clears the environment of any existing objects
+
+suppressPackageStartupMessages({ # reduces annoying printing
+  library(janitor) # has helpful cleaning functions
+  library(knitr) # knitting functions (transforming RMarkdown file to HTML)
+  library(lubridate) # date parsing functions
+  library(scales) # library for formatting ggplot axes
+  library(tidyverse) # workhorse dplyr package
+})
+
+options(dplyr.summarise.inform = FALSE) # turns off an annoying dplyr behavior
+
+set.seed(487) # setting the seed makes random operations reproducible
+```
+
+
+## Data Import
+Once we've cleared the environment and set up the packages we want to use, we can start analyzing data. The first step is importing. To do this, you must find the location of the file you want to import on your computer. Once you do that, there are two options for importing, both of them involving knowing the *absolute path* of the file. To get this, I find it easiest to right click on the file in a file browser and copy the path name. For Mac, right click and hold down option, and then select "Copy as Pathname". For Windows, right click and hold down shift, and then select "Copy as Path". For me (to import the OJ dataset we'll use), this is `'/Users/dans/Desktop/ECON/oj.csv'`.
+
+### Absolute Path Import
+
+If you want to just use this directly, you can import the data as
+
+```{r}
+data_og <- read_csv('/Users/dans/Desktop/ECON/oj.csv',
+                    show_col_types = FALSE) %>% # suppress column type printout
+  clean_names() # a janitor function that makes dataframe column headers snake_case
+```
+
+### Relative Path Import
+Alternatively, you can also set your working directory (think of this as telling your computer that it only needs to look in a certain folder for files) and then have a slightly shorter import. **Note that your working directory will stay set to this until you change it, so if you set it and then try to reference a file outside of this directory, R will not find it**.
+
+```{r}
+setwd('/Users/dans/Desktop/ECON/ECON/oj.csv')
+
+data_og <- read_csv('oj.csv',
+                    show_col_types = FALSE) %>% # suppress column type printout
+  clean_names() # a janitor function that makes dataframe column headers snake_case
+```
+
+### URL
+
+Finally, the easiest way (for our specific case) may be to just use Jacob's website:
+
+```{r}
+oj_url <- 'http://www.jacoblariviere.com/DS/oj.csv'
+
+data_og <- read_csv(oj_url,
+                    show_col_types = FALSE) %>% # suppress column type printout
+  clean_names() # a janitor function that makes dataframe column headers snake_case
+```
+
+## `dplyr`
+
+`dplyr` is a widely-used library for data wrangling that I highly recommend using for your problem sets this quarter. Some potentially useful links:
+
+- [`dplyr` cheatsheet](https://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf)
+- [`dplyr` homepage](https://dplyr.tidyverse.org/)
+- [`dplyr` vignette](https://cran.r-project.org/web/packages/dplyr/vignettes/dplyr.html)
+
+
+Here are some benefits:
+
+- `dplyr` is fairly ubiquitous, which means that you'll be practicing coding in a way that is likely similar to potential employers or collaborators.
+- `dplyr` is (by code standards) pretty easy to read -- there aren't that many functions, and once you get the hang of them, you can look at code and grasp what it's doing fairly quickly.
+- There is a large community of people online working to improve and expand the `tidyverse` (the larger universe of packages to which `dplyr` belongs), which means that there are more and more opportunities for your code to integrate pretty easily into other packages.
+- `dplyr` is built in such a way that it's similar to the language SQL, which is often a requirement of industry work in applied Economics/applied Statistics/Data Science. Knowing `dplyr` will not teach you SQL directly, but if you know `dplyr` and move to SQL, a lot of SQL syntax will make some intuitive sense to you.
+- `dplyr` leverages "pipes", which allows you to chain together a lot of successive operations.
+
+The main drawback to `dplyr` is speed; for large datasets (far larger than the ones that we'll use in this class), a better option tends to be a package called [`data.table`](https://s3.amazonaws.com/assets.datacamp.com/blog_assets/datatable_Cheat_Sheet_R.pdf). `data.table` is more complicated and harder to parse, so I do not recommend it for this class, but if you'd like to give it a shot or discuss it in office hours, please be my guest!
+
+### Important `dplyr` functions
+
+For most of our work this quarter, you really only need to use a few functions effectively to prepare dataframes that you can put into models. They are:
+
+- `select()`: select a subset of columns from the dataset
+- `filter()`: filter a dataset to rows matching a logical condition
+- `mutate()`: create a new column of a dataframe as some function of existing columns
+- `group_by()`: specify at which level an operation should be performed
+- `summarise()`: on a grouped dataframe, perform aggregation
+
+Finally, one of the nicest things about `dplyr` is being able to use pipes. A pipe is the operator `%>%` (on Mac, <kbd>CMD</kbd><kbd>SHIFT</kbd><kbd>M</kbd>, on PC, <kbd>CTRL</kbd><kbd>SHIFT</kbd><kbd>M</kbd>). I find it helpful to think of pipes as the code equivalent of saying "and then". For example, suppose I wanted to take our dataset, filter to only the Dominick's observations, and then select only the columns pertaining to date, store, and price. I could do this as
+
+```{r}
+# less good way
+dominicks_data <- filter(data_og, brand == 'dominicks')
+date_store_price_dominicks_data <- select(dominicks_data, week, store, price)
+```
+
+This is a little annoying because I'm defining each iterative dataset as its own object, even though these individual functions are part of the same process. What `dplyr` allows me to do is the following:
+
+```{r}
+# preferred way
+new_data <- data_og %>% 
+  filter(brand == 'dominicks') %>% 
+  select(week, store, price)
+```
+
+In English: take my dataset, *and then* filter to only observations where brand is Dominick's (note `==`, which does logical tests, as opposed to `=`, which defines variables), *and then* select the variables I want. If you want to confirm visually what this looks like, you can run `View(new_data)` which will bring up the dataset, or just click on it in the Environment tab. The data view window has options for filtering and sorting at the top.
+
+Suppose instead that I wanted to create a `log(price)` variable, since we'll be working with elasticities. I could do this the following way in `dplyr`:
+
+```{r}
+log_price_data <- data_og %>% 
+  mutate(log_price = log(price))
+```
+
+Finally, we will sometimes want to do operations by group. For example, I might want to know how many observations I have from each brand in my data. An easy way to do this without using `dplyr` would be the following:
+
+```{r}
+table(data_og$brand, useNA='always') # the useNA argument is useful to make sure you don't have nulls
+```
+
+Now, let's test the `table` function. I want to count the observations in the data, but I want to do so *by brand*. This can be done in `dplyr` like this:
+
+```{r}
+counts_by_store <- data_og %>% 
+  group_by(brand) %>% # tell dplyr to aggregate on the brand level
+  summarise(n_obs = n()) %>% # we want to count observations
+  ungroup() # IMPORTANT -- always ungroup your data when you're done
+
+counts_by_store
+```
+
+Looks like they agree! A common question is: why do we need `summarise` here? Why can't we just use `mutate`? Well, let's try it!
+
+```{r}
+counts_by_store <- data_og %>% 
+  group_by(brand) %>% 
+  mutate(n_obs = n()) %>%
+  ungroup()
+
+counts_by_store
+```
+
+So here's the deal: `summarise` will reduce your data to one observation per combination of the grouping variables. So here we have one grouping variable with three levels, so it returns three observations (which is all we need). `mutate` will keep all of our original data, but perform the operation by group in the new column, which is sometimes desirable! For example, suppose we wanted to find out what the largest `logmove` was for each brand in our dataset. We'd do the following:
+
+```{r}
+big_quantities <- data_og %>% 
+  group_by(brand) %>% # want to work on the brand level
+  mutate(max_logmove = max(logmove, na.rm = TRUE)) %>% # na.rm=TRUE will do the operation and ignore any null values -- if not, a null value will cause the operation to return null
+  ungroup() %>% 
+  filter(logmove == max_logmove) %>% # only give us the observations where logmove is the maximum logmove
+  select(brand, store, week, logmove, max_logmove)
+
+big_quantities
+```
+
+With a little practice, these functions become second nature, and you'll be able to program data operations very easily!
+
+## Plotting
+
+We will ask you to create plots in this class -- we recommend doing this via the `ggplot2` package ([cheat sheet](https://www.maths.usyd.edu.au/u/UG/SM/STAT3022/r/current/Misc/data-visualization-2.1.pdf)). 
+
+Suppose we wanted to plot the average price of orange juice by brand over time. First, we need to create the dataset -- it should have three variables: week, brand, and average price. We want to do this by group, so we'll use `group_by` and `summarise`:
+
+```{r}
+plot_data <- data_og %>% 
+  group_by(brand, week) %>% # perform the operation by brand and week
+  summarise(mean_price = mean(price, na.rm = TRUE)) %>% # calculate the average price by week
+  ungroup()
+
+plot_data
+```
+
+Now, we'll put this into a `ggplot` call:
+
+```{r}
+ggplot(data = plot_data) + # specify which dataframe we'll plot
+  geom_line(aes(x = week, y = mean_price, color = brand)) + # specify which variables go where
+  labs(
+    x = 'Week', 
+    y = 'Average Price', 
+    title = 'Average Price of OJ by Brand over Time'
+  ) + # add the axis labels and title
+  theme_bw() # nice formatting option, there are different themes in the package if you don't like this one
+```

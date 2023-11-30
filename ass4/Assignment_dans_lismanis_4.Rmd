@@ -1,0 +1,579 @@
+---
+title: "Assignment 4"
+author: "Dans Lismanis"
+date: "2023-10-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question 1
+
+```{r}
+df=read.csv("/Users/dans/Desktop/ECON/econ_assignment_4/oj.csv")
+lp=log(df$price)
+library(fastDummies)
+df=dummy_cols(df, select_columns ='brand')
+df$featdom=df$feat*df$brand_dominicks
+df$featminu=df$feat*df$brand_minute.maid
+df$feattro=df$feat*df$brand_tropicana
+
+df$dom_lp=lp*df$brand_dominicks
+df$min_lp=lp*df$brand_minute.maid
+df$tro_lp=lp*df$brand_tropicana
+
+df1=df
+df1$week=df1$week+1
+df2=merge(df,df1, by=c("brand","store","week"))
+colnames(df2)[colnames(df2)=="price.y"]="LagPrice"
+colnames(df2)[colnames(df2)=="price.x"]="Price"
+df2$LnPrice=log(df2$Price)
+df2$LnLagPrice=log(df2$LagPrice)
+df2$Lagxcurrent=(df2$LnPrice)*(df2$LnLagPrice)
+
+
+reg1=lm(logmove.x~ LnPrice+LnLagPrice+min_lp.x+tro_lp.x+feat.x+brand_minute.maid.x+brand_tropicana.x+AGE60.x+EDUC.x+ETHNIC.x+INCOME.x+HHLARGE.x+WORKWOM.x+HVAL150.x, data=df2)
+summary(reg1)
+MSE_lm=mean((df2$logmove.x-predict(reg1))^2)
+```
+
+### a)
+
+```{r}
+library(glmnet)
+```
+
+### b)
+
+```{r}
+set.seed(720)
+df_RHS=df2[c('LnPrice',"LnLagPrice","Lagxcurrent","min_lp.x","tro_lp.x","feat.x","brand_minute.maid.x","brand_tropicana.x","AGE60.x","EDUC.x","ETHNIC.x","INCOME.x","HHLARGE.x","WORKWOM.x","HVAL150.x")]
+y=df2[["logmove.x"]]
+x=as.matrix(df_RHS)
+
+```
+
+### c)
+
+```{r}
+set.seed(720)
+#lasso_v1 <- cv.glmnet(x, y, alpha=1)
+lasso_v1 <- glmnet(x, y, alpha=1)
+
+#Results
+plot(lasso_v1)
+coef(lasso_v1, s=lasso_v1$lambda.min)
+
+```
+
+```{r}
+# Now ready for cross validation version of the object
+cvfit <- cv.glmnet(x, y, alpha=1)
+#Results
+plot(cvfit)
+cvfit$lambda.min
+log(cvfit$lambda.min)
+coef(cvfit, s = "lambda.min")
+```
+
+Although none of the regressors were completly "kicked out" a lot of them were brought to be really close to 0. The ratio of number of regressors to the number of observations is one to 2000. Since the ratio of regressors to observations is rather small the problem of overfitting is not as likely. As this happens when the ratio is too big.
+
+### d)
+
+We can figure out the MSE by looking at the plot of cvfit, in our case we have 13 regressors, and this makes our MSE to be around 0.43 for 1c.
+
+And MSE for lm model is
+```{r}
+MSE_lm
+```
+### e)
+
+Using Lasso we can decide what regressors trully matter, which ones are most important. We use our economic intuition to decide which parameters to investigate in the first place.
+
+## Question 2:
+
+```{r}
+
+reg2=lm(logmove.x~ LnPrice+LnLagPrice+Lagxcurrent+min_lp.x+tro_lp.x+feat.x+brand_minute.maid.x+brand_tropicana.x+AGE60.x+EDUC.x+ETHNIC.x+INCOME.x+HHLARGE.x+WORKWOM.x+HVAL150.x, data=df2)
+summary(reg2)
+```
+
+### a)
+
+#### i)
+
+The Elasticity for dominicks is -2.95990+0.91028-0.49285=-1.56 
+
+#### ii) 
+
+Equal to -1.56+1.07191+0.31768=-0.16
+
+#### iii)
+
+-0.16+0.81=0.65 
+
+#### iv)
+
+```{r}
+inter=confint(reg1)
+print(inter)
+```
+
+### b)
+
+DOminicks orange juice has the most elastic demand, this means that it must have the lowest markup against costs, this is because increasing markup signicifantly decreases demand.
+
+## Question 3
+
+### a)
+
+Data preperation
+
+```{r}
+df2$dfeatlp=df2$brand_dominicks.x*df2$feat.x*df2$LagPrice
+df2$mfeatlp=df2$brand_minute.maid.x*df2$feat.x*df2$LnPrice
+df2$tfeatlp=df2$brand_tropicana.x*df2$feat.x*df2$LnPrice
+domdata=df2[df2$brand_dominicks.x==1,]
+minudata=df2[df2$brand_minute.maid.x==1,]
+trodata=df2[df2$brand_tropicana.x==1,]
+
+x1=as.matrix(domdata[c("LnPrice","AGE60.x","EDUC.x","ETHNIC.x","INCOME.x","HHLARGE.x","WORKWOM.x","HVAL150.x")])
+x2=as.matrix(minudata[c("LnPrice","AGE60.x","EDUC.x","ETHNIC.x","INCOME.x","HHLARGE.x","WORKWOM.x","HVAL150.x")])
+x3=as.matrix(trodata[c("LnPrice","AGE60.x","EDUC.x","ETHNIC.x","INCOME.x","HHLARGE.x","WORKWOM.x","HVAL150.x")])
+
+y1=domdata[["logmove.x"]]
+y2=minudata[["logmove.x"]]
+y3=trodata[["logmove.x"]]
+p1=domdata[["LnPrice"]]
+p2=minudata[["LnPrice"]]
+p3=trodata[["LnPrice"]]
+
+
+x1=cbind(x1,p2)
+x1=cbind(x1,p3)
+x2=cbind(x2,p1)
+x2=cbind(x2,p3)
+x3=cbind(x3,p1)
+x3=cbind(x3,p2)
+```
+
+Regression for dominicks
+
+```{r}
+lasso_dom=glmnet(x1,y1,alpha = 1)
+domfita <- cv.glmnet(x1, y1, alpha=1)
+domfita$lambda.min
+log(domfita$lambda.min)
+coef(domfita, s = "lambda.min")
+
+```
+
+Regression for minutemaid
+
+```{r}
+lasso_min=glmnet(x2,y2,alpha = 1)
+minfita <- cv.glmnet(x2, y2, alpha=1)
+minfita$lambda.min
+log(minfita$lambda.min)
+coef(minfita, s = "lambda.min")
+
+```
+
+Regression for tropicana
+
+```{r}
+lasso_tro=glmnet(x3,y3,alpha = 1)
+trofita <- cv.glmnet(x3, y3, alpha=1)
+trofita$lambda.min
+log(trofita$lambda.min)
+coef(trofita, s = "lambda.min")
+
+```
+#### Matrix
+```{r}
+mat2a=as.matrix(coef(domfita))[c(2,10,11),]
+t2=
+mat2a=rbind(mat2a,as.matrix(coef(minfita))[c(2,10,11),][c(2,1,3)])
+mat2a=rbind(mat2a,as.matrix(coef(trofita))[c(2,10,11),][c(2,3,1)])
+colnames(mat2a)=c("p1","p2","p3")
+rownames(mat2a)=c("Dominicks","MinuteMaid","Tropicana")
+mat2a
+```
+### b)
+
+```{r}
+
+x1=as.matrix(domdata[c("LnPrice","featdom.x","dfeatlp","featminu.x","mfeatlp","feattro.x","tfeatlp","AGE60.x","EDUC.x","ETHNIC.x","INCOME.x","HHLARGE.x","WORKWOM.x","HVAL150.x")])
+x2=as.matrix(minudata[c("LnPrice","featdom.x","dfeatlp","featminu.x","mfeatlp","feattro.x","tfeatlp","AGE60.x","EDUC.x","ETHNIC.x","INCOME.x","HHLARGE.x","WORKWOM.x","HVAL150.x")])
+x3=as.matrix(trodata[c("LnPrice","featdom.x","dfeatlp","featminu.x","mfeatlp","feattro.x","tfeatlp","AGE60.x","EDUC.x","ETHNIC.x","INCOME.x","HHLARGE.x","WORKWOM.x","HVAL150.x")])
+x1=cbind(x1,p2)
+x1=cbind(x1,p3)
+x2=cbind(x2,p1)
+x2=cbind(x2,p3)
+x3=cbind(x3,p1)
+x3=cbind(x3,p2)
+```
+
+Regression for dominicks
+
+```{r}
+lasso_dom=glmnet(x1,y1,alpha = 1)
+domfit <- cv.glmnet(x1, y1, alpha=1)
+domfit$lambda.min
+log(domfit$lambda.min)
+coef(domfit, s = "lambda.min")
+```
+
+Regression for minutemaid
+
+```{r}
+lasso_min=glmnet(x2,y2,alpha = 1)
+minfit <- cv.glmnet(x2, y2, alpha=1)
+minfit$lambda.min
+log(minfit$lambda.min)
+coef(minfit, s = "lambda.min")
+```
+
+Regression for tropicana
+
+```{r}
+lasso_tro=glmnet(x3,y3,alpha = 1)
+trofit <- cv.glmnet(x3, y3, alpha=1)
+trofit$lambda.min
+log(trofit$lambda.min)
+coef(trofit, s = "lambda.min")
+```
+#### Matrix
+```{r}
+mat3b=as.matrix(coef(domfit))[c(2,16,17),]
+mat3b=rbind(mat3b,as.matrix(coef(minfit))[c(2,16,17),][c(2,1,3)])
+mat3b=rbind(mat3b,as.matrix(coef(trofit))[c(2,16,17),][c(2,3,1)])
+colnames(mat3b)=c("p1","p2","p3")
+rownames(mat3b)=c("Dominicks","MinuteMaid","Tropicana")
+mat3b
+```
+
+#### i)
+
+The elasticities decrease affter feature is introduced as one of the regressors.
+
+#### ii)
+
+Dominicks suffers most when Minute Maid decreases its price and is on sale, as they have the greater cross elasticities.
+
+### c)
+
+Minute Maid and Dominicks are the most competitive with each other.
+
+#### i)
+
+this can be seen as their cross elasticieties are the largest.
+
+#### ii)
+
+I would expect their prices to move close together, as a decrease in ones price leads to a lot of lost sales for the other. 
+
+They would be more closely related than the other pairs of products.
+
+## Question 4
+
+### a)
+
+```{r}
+df2$sales=exp(df2$logmove.x)
+```
+
+### b)
+
+```{r}
+library(plyr)
+Df3 <- ddply(df2, c('store','week'),function(x) c(weighted_mean = weighted.mean(x$Price,x$sales)))
+dataf <- merge(df2, Df3, by = c("store", "week"))
+```
+
+## Question 5
+
+### a)
+
+```{r}
+library(rpart)
+library(maptree)
+```
+
+### b)
+
+```{r}
+dataToPass<-dataf[,c("weighted_mean","AGE60.x","EDUC.x","ETHNIC.x","INCOME.x","HHLARGE.x","WORKWOM.x","HVAL150.x","SSTRDIST.x","SSTRVOL.x","CPDIST5.x","CPWVOL5.x")]
+#The above creates a dataframe from the existing one (with weighted mean merged back in) which will then be passed into rpart (tree partitioning algorithm).  
+
+fit<-rpart(as.formula(weighted_mean ~ .),data=dataToPass,method="anova",cp=0.007)
+```
+
+### c)
+
+```{r}
+draw.tree(fit)
+```
+
+### d)
+
+```{r}
+dataToPass$leaf = fit$where #This assigns leaves to observations.
+```
+
+##Question 6
+
+```{r}
+dataf$leaf=fit$where
+leaf2=dataf[dataf$leaf==2,]
+leaf4=dataf[dataf$leaf==4,]
+leaf5=dataf[dataf$leaf==5,]
+l2=lm(logmove.x~LnPrice+featdom.x+featminu.x+feattro.x,data=leaf2)
+summary(l2)
+l4=lm(logmove.x~LnPrice+featdom.x+featminu.x+feattro.x,data=leaf2)
+summary(l4)
+l5=lm(logmove.x~LnPrice+featdom.x+featminu.x+feattro.x,data=leaf2)
+summary(l5)
+```
+
+### a)
+
+####For Leaf 2 Data
+
+```{r}
+leaf2dom=leaf2[leaf2$brand=="dominicks",]
+leaf2minu=leaf2[leaf2$brand=="minute.maid",]
+leaf2tro=leaf2[leaf2$brand=="tropicana",]
+
+leaf2dom$m=leaf2minu["LnPrice"]
+leaf2dom$t=leaf2tro["LnPrice"]
+
+leaf2minu$d=leaf2dom["LnPrice"]
+leaf2minu$t=leaf2tro["LnPrice"]
+
+leaf2tro$d=leaf2dom["LnPrice"]
+leaf2tro$m=leaf2minu["LnPrice"]
+```
+
+Dominicks:
+
+```{r}
+l2d=lm(logmove.x~LnPrice+m$LnPrice+t$LnPrice+featdom.x+featminu.x+feattro.x,data=leaf2dom)
+summary(l2d)
+```
+
+Minute Maid
+
+```{r}
+l2m=lm(logmove.x~LnPrice+d$LnPrice+t$LnPrice+featdom.x+featminu.x+feattro.x,data=leaf2minu)
+summary(l2m)
+```
+
+Tropicana
+
+```{r}
+l2t=lm(logmove.x~LnPrice+d$LnPrice+m$LnPrice+featdom.x+featminu.x+feattro.x,data=leaf2tro)
+summary(l2t)
+```
+
+#### For Leaf 4
+
+Data
+
+```{r}
+leaf4dom=leaf4[leaf4$brand=="dominicks",]
+leaf4minu=leaf4[leaf4$brand=="minute.maid",]
+leaf4tro=leaf4[leaf4$brand=="tropicana",]
+leaf4dom$m=leaf4minu["LnPrice"]
+leaf4dom$t=leaf4tro["LnPrice"]
+
+leaf4minu$d=leaf4dom["LnPrice"]
+leaf4minu$t=leaf4tro["LnPrice"]
+
+leaf4tro$d=leaf4dom["LnPrice"]
+leaf4tro$m=leaf4minu["LnPrice"]
+```
+
+Dominicks:
+
+```{r}
+l4d=lm(logmove.x~LnPrice+m$LnPrice+t$LnPrice+featdom.x+featminu.x+feattro.x,data=leaf4dom)
+summary(l4d)
+```
+
+Minute Maid
+
+```{r}
+l4m=lm(logmove.x~LnPrice+d$LnPrice+t$LnPrice+featdom.x+featminu.x+feattro.x,data=leaf4minu)
+summary(l4m)
+```
+
+Tropicana
+
+```{r}
+l4t=lm(logmove.x~LnPrice+d$LnPrice+m$LnPrice+featdom.x+featminu.x+feattro.x,data=leaf4tro)
+summary(l4t)
+```
+
+#### For Leaf 5
+
+Data
+
+```{r}
+leaf5dom=leaf5[leaf5$brand=="dominicks",]
+leaf5minu=leaf5[leaf5$brand=="minute.maid",]
+leaf5tro=leaf5[leaf5$brand=="tropicana",]
+leaf5dom$m=leaf5minu["LnPrice"]
+leaf5dom$t=leaf5tro["LnPrice"]
+
+leaf5minu$d=leaf5dom["LnPrice"]
+leaf5minu$t=leaf5tro["LnPrice"]
+
+leaf5tro$d=leaf5dom["LnPrice"]
+leaf5tro$m=leaf5minu["LnPrice"]
+```
+
+Dominicks:
+
+```{r}
+l5d=lm(logmove.x~LnPrice+m$LnPrice+t$LnPrice+featdom.x+featminu.x+feattro.x,data=leaf5dom)
+summary(l5d)
+```
+
+Minute Maid
+
+```{r}
+l5m=lm(logmove.x~LnPrice+d$LnPrice+t$LnPrice+featdom.x+featminu.x+feattro.x,data=leaf5minu)
+summary(l5m)
+```
+
+Tropicana
+
+```{r}
+l5t=lm(logmove.x~LnPrice+d$LnPrice+m$LnPrice+featdom.x+featminu.x+feattro.x,data=leaf5tro)
+summary(l5t)
+```
+
+### b)
+
+#### Leaf 2
+
+```{r}
+leaf2$fdomlp=leaf2dom$feat.x*leaf2dom$LnPrice
+leaf2$fminulp=leaf2minu$feat.x*leaf2minu$LnPrice
+leaf2$ftrolp=leaf2tro$feat.x*leaf2tro$LnPrice
+
+leaf2dom=leaf2[leaf2$brand=="dominicks",]
+leaf2minu=leaf2[leaf2$brand=="minute.maid",]
+leaf2tro=leaf2[leaf2$brand=="tropicana",]
+
+l2bd=lm(logmove.x~fdomlp+fminulp+ftrolp, data=leaf2dom)
+summary(l2bd)
+
+l2bm=lm(logmove.x~fdomlp+fminulp+ftrolp, data=leaf2minu)
+summary(l2bm)
+
+l2bt=lm(logmove.x~fdomlp+fminulp+ftrolp, data=leaf2tro)
+summary(l2bt)
+```
+
+#### Leaf 4
+
+```{r}
+leaf4$fdomlp=leaf4dom$feat.x*leaf4dom$LnPrice
+leaf4$fminulp=leaf4minu$feat.x*leaf4minu$LnPrice
+leaf4$ftrolp=leaf4tro$feat.x*leaf4tro$LnPrice
+
+leaf4dom=leaf4[leaf4$brand=="dominicks",]
+leaf4minu=leaf4[leaf4$brand=="minute.maid",]
+leaf4tro=leaf4[leaf4$brand=="tropicana",]
+
+l4bd=lm(logmove.x~fdomlp+fminulp+ftrolp, data=leaf4dom)
+summary(l4bd)
+
+l4bm=lm(logmove.x~fdomlp+fminulp+ftrolp, data=leaf4minu)
+summary(l4bm)
+
+l4bt=lm(logmove.x~fdomlp+fminulp+ftrolp, data=leaf4tro)
+summary(l4bt)
+```
+
+#### Leaf 5
+
+```{r}
+leaf5$fdomlp=leaf5dom$feat.x*leaf5dom$LnPrice
+leaf5$fminulp=leaf5minu$feat.x*leaf5minu$LnPrice
+leaf5$ftrolp=leaf5tro$feat.x*leaf5tro$LnPrice
+
+leaf5dom=leaf5[leaf5$brand=="dominicks",]
+leaf5minu=leaf5[leaf5$brand=="minute.maid",]
+leaf5tro=leaf5[leaf5$brand=="tropicana",]
+
+l5bd=lm(logmove.x~fdomlp+fminulp+ftrolp, data=leaf5dom)
+summary(l5bd)
+
+l5bm=lm(logmove.x~fdomlp+fminulp+ftrolp, data=leaf5minu)
+summary(l5bm)
+
+l5bt=lm(logmove.x~fdomlp+fminulp+ftrolp, data=leaf5tro)
+summary(l5bt)
+```
+
+#### Matrixes
+
+For Leaf 2: Self total 0.084
+
+```{r}
+dominicks2=coef(l2bd)[c("fdomlp","fminulp","ftrolp")]
+minute_maid2=coef(l2bm)[c("fdomlp","fminulp","ftrolp")]
+tropicana2=coef(l2bt)[c("fdomlp","fminulp","ftrolp")]
+matrixleaf2=rbind(dominicks2,minute_maid2)
+matrixleaf2=rbind(matrixleaf2,tropicana2)
+matrixleaf2
+```
+
+For Leaf 4: Swlf total 0.0057
+
+```{r}
+dominicks4=coef(l4bd)[c("fdomlp","fminulp","ftrolp")]
+minute_maid4=coef(l4bm)[c("fdomlp","fminulp","ftrolp")]
+tropicana4=coef(l4bt)[c("fdomlp","fminulp","ftrolp")]
+matrixleaf4=rbind(dominicks4,minute_maid4)
+matrixleaf4=rbind(matrixleaf4,tropicana4)
+matrixleaf4
+```
+
+For Leaf 5: -0.022
+
+```{r}
+dominicks5=coef(l5bd)[c("fdomlp","fminulp","ftrolp")]
+minute_maid5=coef(l5bm)[c("fdomlp","fminulp","ftrolp")]
+tropicana5=coef(l5bt)[c("fdomlp","fminulp","ftrolp")]
+matrixleaf5=rbind(dominicks5,minute_maid5)
+matrixleaf5=rbind(matrixleaf5,tropicana5)
+matrixleaf5
+```
+
+### c)
+
+The highest own priceelasticities are for leaf 2 and lowest for leaf 5 but the elasticities flucuate more than expected for different leafs. 
+
+## Question 7 
+
+### a)
+
+Because the elasticities are highest this means that customers are much more price sensitive, therefore markups should be relatively lower. 
+
+### b) 
+
+The highest own priceelasticities are for leaf 2 and lowest for leaf 5. The cross price elasticities for different brands are simillar in leaf 2 and 5. 
+
+#### i) 
+
+This implies that the markups between brands are simillar in both leafs, although the markups of each product are different, the cross brand markups are simmilar. 
+
+#### ii) 
+
+Since the cross price elasticities are simillar, so the sales should accur are the same time across stores.

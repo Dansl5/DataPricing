@@ -1,0 +1,255 @@
+---
+title: "Assignment2"
+author: "Dans Lismanis"
+date: "2023-10-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Practical questions
+
+## Questions 2,3
+
+```{r}
+df=read.csv("oj.csv")
+library(ggplot2)
+```
+
+## Question 4
+
+### a)
+
+```{r}
+ggplot(df, aes(y = price)) + geom_boxplot()
+```
+
+### b)
+
+```{r}
+lp=log(df$price)
+ggplot(df, aes(y = lp)) + geom_boxplot()
+
+```
+
+### c)
+
+```{r}
+ggplot(df,aes(factor(brand), price)) + geom_boxplot(aes(fill=brand))
+```
+
+### d)
+
+```{r}
+
+ggplot(df,aes(factor(brand), lp)) + geom_boxplot(aes(fill=brand))
+```
+
+### e)
+
+The box plots given above show the price of the orange juice as whole, and also the mean of price, this is also then done for every brand individually. In points b and d the natural logarithm of the price is taken and shown in the graph. This is usually done when the price range is drastically different, but since the prices are not that far apart, we do not gain much from this.
+
+## Question 5
+
+```{r}
+ggplot(df,aes(logmove, lp)) + geom_point(aes(color=factor(brand)))
+```
+
+## a)
+
+Here we can see all the sales of different brands at different price points. We can also use this to estimate the elasticities of the different brands.
+
+## Question 6
+
+### a)
+
+```{r}
+reg1=lm(logmove ~ lp, data=df)
+summary(reg1)
+pred=predict(reg1)
+residual=df$logmove-pred
+mse=mean(residual^2)
+mse
+
+```
+
+To evaluate the model fit we look at the MSE which is 0.8228178. Furthermore we can see that R\^2 of this model is 0.2081. **The Elasticity of this model coresponds to coefficient which is equal to -1.6, this makes sense as we are looking at the elasticity of the orange juice as whole, and people who really like orange juice will keep buying it even if the price increases.**
+
+### b)
+
+```{r}
+reg2=lm(logmove ~ lp + brand, data=df)
+summary(reg2)
+```
+
+The coefficient of logarithm m of price (lp) went from -1.6 to -3.1, this is due to the fact that we have now included dummy variables for both minute maid and tropicana. This increase in predicted coefficient of lp makes sense as Dominics orange juice is bound to bee more elastic.
+
+Interpreting the coefficient of lp:
+
+Increasing the price of orange juice by 1%, ceteris paribus, will decrease the quantity of orange juice sold by 3.1%.
+
+Interpreting just the dummy variables:
+
+1)If the brand of orange juice is changed from dominics to Minute maid, ceteris paribus, then the the log quantity sold will increase by 0.87. So the quantity sold will increase by 139%.
+
+2)If the brand of orange juice is changed from dominics to Minute maid, ceteris paribus, then the the log quantity sold will increase by 1.52994. So the quantity sold will increase by 362%.
+
+### c)
+
+```{r}
+library(fastDummies)
+df=dummy_cols(df, select_columns ='brand')
+df$dom_lp=lp*df$brand_dominicks
+df$min_lp=lp*df$brand_minute.maid
+df$tro_lp=lp*df$brand_tropicana
+reg3=lm(logmove ~ dom_lp+min_lp + tro_lp,data=df)
+summary(reg3)
+```
+
+We can see how much does a price change impacts the ln of quantity sold for each firm.\
+The elasticity for firm Dominicks is -0.0005168654, for Minute maid is -0.0003504944 and for Tropicana -0.0002808262.\
+These elasticities make sense as the more expensive brand is the lower the elasticity is.
+
+## Question 7
+
+### a)
+
+```{r}
+library(dplyr)
+df_group= df %>% 
+  group_by(brand)
+df_summary= df_group %>%
+  summarize(meanprice=mean(price),featrate=mean(feat),meanmove=mean(logmove))
+df_summary
+
+```
+
+### b)
+
+We add a dummy variable for the linear regression to indicate wheather this product was featured or not $\beta_{feat}$ now $y_i=\beta_0 + \beta_{dom\_lp}dom\_lp_i+\beta_{min\_lp}min\_lp_i +\beta_{tro\_lp}tro\_lp_i+\beta_{feat}feat_i+\epsilon_i$
+
+### c)
+
+```{r}
+reg7c=lm(logmove ~ dom_lp+min_lp + tro_lp+ feat,data=df)
+summary(reg7c)
+```
+
+### d)
+
+```{r}
+df=dummy_cols(df, select_columns ='brand')
+df$featdom=df$feat*df$brand_dominicks
+df$featminu=df$feat*df$brand_minute.maid
+df$feattro=df$feat*df$brand_tropicana
+
+reg7c=lm(logmove~ dom_lp+min_lp+tro_lp+featdom+featminu+feattro, data=df)
+summary(reg7c)
+ElastDom=1.74/9.17*-3.20262
+ElastDom
+ElastMinuteMaid=2.24/9.22*-2.27032
+ElastMinuteMaid
+ElastTrop=2.87/9.11*-1.65643
+ElastTrop
+
+```
+
+### e)
+
+```{r}
+reg7e=lm(logmove~ dom_lp+min_lp+tro_lp+featdom+featminu+feattro+EDUC+ETHNIC+HVAL150, data=df)
+summary(reg7e)
+```
+
+## Question 8
+
+### a)
+
+From question 7d it can be seen that Dominicks has the highest demand elasticity and Tropicana has the lowest.
+
+### b)
+
+Yes, the average prices match with this result as Dominicks has the lowest average price and Tropicana highest.
+
+```{r}
+ChQSD=ElastDom*-1.65643
+ChQSM=-3.20262*ElastMinuteMaid
+ChQST=-2.27032*ElastTrop
+UnitCostDom=1.74/(1+ChQSD)
+UnitCostDom
+UnitCostMinuteMaid=2.24/(1+ChQSM)
+UnitCostMinuteMaid
+UnitCostTrop=2.87/(1+ChQST)
+UnitCostTrop
+ProfDom=1.74-UnitCostDom
+ProfMin=2.24-UnitCostMinuteMaid
+ProfTrop=2.87-UnitCostTrop
+ProfDom
+ProfMin
+ProfTrop
+
+```
+
+For Dominicks and Minute Maid unit costs are quite simillar, although, suprisingly Minute Maid has a lower unit cost and has a much higher average price. But still Tropicana makes the most profit per unit sold.
+
+## Question 9
+
+### a)
+
+```{r}
+reg9a=lm(logmove~ dom_lp+min_lp+tro_lp+featdom+featminu+feattro+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150, data=df)
+summary(reg9a)
+```
+
+### b)
+
+From the summary above we can see that all the added demographics variables are significant in determining the demand.
+
+### c)
+
+```{r}
+reg9a=lm(logmove~ dom_lp+min_lp+tro_lp+featdom+featminu+feattro+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150, data=df)
+df$logmove_hat=predict(reg9a, newdata=df)
+Rsq=cor(df$logmove,df$logmove_hat)
+Rsq
+##Now for no demographic data
+reg7c=lm(logmove~ dom_lp+min_lp+tro_lp+featdom+featminu+feattro, data=df)
+df$nodemolog=predict(reg7c, newdata=df)
+Rsq7c=cor(df$logmove,df$nodemolog)
+Rsq-Rsq7c
+```
+
+The improvement compared to the demographic data is 0.02410366. So our model explains 2.4% more.
+
+### d)
+
+```{r}
+library(dplyr)
+training=sample_n(df,size=28947*0.8)
+test=anti_join(df,training)
+
+nodomtrain=lm(logmove~ dom_lp+min_lp+tro_lp+featdom+featminu+feattro, data=training)
+prednodomtrain=predict(nodomtrain)
+MSE_train1=mean((train1$logmove.x-predict(train1reg))^2)
+MSE_nodomtrain
+
+domtrain=lm(logmove~ dom_lp+min_lp+tro_lp+featdom+featminu+feattro+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150, data=training)
+preddomtrain=predict(domtrain)
+MSE_domtrain=mean((training$logmove-preddomtrain)^2)
+MSE_domtrain
+
+nodomtest=lm(logmove~ dom_lp+min_lp+tro_lp+featdom+featminu+feattro, data=test)
+prednodomtest=predict(nodomtest)
+MSE_nodomtest=mean((test$logmove-prednodomtest)^2)
+MSE_nodomtest
+
+domtest=lm(logmove~ dom_lp+min_lp+tro_lp+featdom+featminu+feattro+AGE60+EDUC+ETHNIC+INCOME+HHLARGE+WORKWOM+HVAL150, data=test)
+MSE_domtest=mean((test$logmove-(predict(domtest)))^2)
+MSE_domtest
+
+```
+
+With both the sampeling and testing data the regression with the domestic variables included has the lower MSE, thereby implying that it is the preffered model.
+

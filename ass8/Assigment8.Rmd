@@ -1,0 +1,773 @@
+---
+title: "Assignment 8"
+author: "Dans Lismanis"
+date: "2023-11-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(data.table)
+library(maptree)
+library(janitor)
+library(broom)
+library(knitr)
+library(tidyverse)
+library(ggplot2)
+library(zoo)
+library(openxlsx)
+library(xgboost)
+set.seed(69)
+```
+
+## Question 1
+
+### Importing data:
+```{r}
+oj <- read_csv('/Users/dans/Desktop/ECON/ass4/oj.csv',
+               show_col_types = FALSE) %>% 
+  mutate(logprice = log(price)) %>% 
+  clean_names()
+
+# create a wide dataset
+oj_wide <- oj %>% 
+  select(store, week, brand, logmove, logprice, feat) %>% 
+  pivot_longer(logmove:feat) %>% 
+  mutate(name = str_c(name, brand, sep = '_')) %>% 
+  pivot_wider(id_cols = c(store, week), names_from = name, values_from = value)
+ 
+# merge on the wide features a few times to create lags
+oj_model <- oj %>% 
+  left_join(oj_wide %>% 
+              mutate(week = week + 1) %>% 
+              rename_with(~(str_c(.x, '_lag_1')), .cols = c(logmove_minute.maid:feat_dominicks)),
+            by = c('store', 'week')) %>% 
+  left_join(oj_wide %>% 
+              mutate(week = week + 2) %>% 
+              rename_with(~(str_c(.x, '_lag_2')), .cols = c(logmove_minute.maid:feat_dominicks)),
+            by = c('store', 'week')) %>% 
+  left_join(oj_wide %>% 
+              mutate(week = week + 3) %>% 
+              rename_with(~(str_c(.x, '_lag_3')), .cols = c(logmove_minute.maid:feat_dominicks)),
+            by = c('store', 'week')) %>% 
+  mutate(brand = factor(brand),
+         week = week - min(week),
+         id = row_number()) %>%  # these identifiers are only necessary for the models where we hold out data, which aren't required
+  select(-sstrvol, -cpwvol5) %>% # remove these features since they involve sales volumes, not sure how calculated
+  na.omit()
+```
+
+#### For some reason a few columns have changed their names
+
+```{r}
+colnames(oj_model)[colnames(oj_model) == "logmove_tropicana.x"] <- "logmove_tropicana_lag_1"
+colnames(oj_model)[colnames(oj_model) == "logprice_tropicana.x"] <- "logprice_tropicana_lag_1"
+colnames(oj_model)[colnames(oj_model) == "feat_tropicana.x"] <- "feat_tropicana_lag_1"
+
+colnames(oj_model)[colnames(oj_model) == "logmove_tropicana.y"] <- "logmove_tropicana_lag_2"
+colnames(oj_model)[colnames(oj_model) == "logprice_tropicana.y"] <- "logprice_tropicana_lag_2"
+colnames(oj_model)[colnames(oj_model) == "feat_tropicana.y"] <- "feat_tropicana_lag_2"
+
+colnames(oj_model)[colnames(oj_model) == "logmove_tropicana"] <- "logmove_tropicana_lag_3"
+colnames(oj_model)[colnames(oj_model) == "logprice_tropicana"] <- "logprice_tropicana_lag_3"
+colnames(oj_model)[colnames(oj_model) == "feat_tropicana"] <- "feat_tropicana_lag_3"
+```
+### Running a tree :
+
+```{r}
+oj_tree <- oj_model %>% 
+  mutate(q = exp(logmove)) %>% 
+  group_by(store, week) %>% 
+  mutate(weighted_mean = weighted.mean(price, q)) %>% 
+  ungroup()
+```
+
+```{r}
+reg_tree_data <- oj_tree %>% 
+  select(weighted_mean, age60:cpdist5)
+```
+
+```{r}
+fit<-rpart(as.formula(weighted_mean ~ .),data=reg_tree_data,method="anova",cp=0.007)
+draw.tree((fit))
+```
+  
+  draw.tree(fit)
+
+### Assigning leafs to entries:
+```{r}
+ojleafs=oj_tree
+ojleafs$leaf = fit$where
+```
+
+### Creating dataframes for each leaf:
+```{r}
+l1=ojleafs[ojleafs$leaf==2,]
+l2=ojleafs[ojleafs$leaf==4,]
+l3=ojleafs[ojleafs$leaf==5,]
+```
+
+### Creating a dataframe for each brand in each leaf
+
+```{r}
+doml1=l1[l1$brand=="dominicks",]
+doml2=l2[l2$brand=='dominicks',]
+doml3=l3[l3$brand=="dominicks",]
+
+minl1=l1[l1$brand=="minute.maid",]
+minl2=l2[l2$brand=='minute.maid',]
+minl3=l3[l3$brand=="minute.maid",]
+
+trol1=l1[l1$brand=="tropicana",]
+trol2=l2[l2$brand=='tropicana',]
+trol3=l3[l3$brand=="tropicana",]
+```
+
+### Getting residuals for each brand for each leaf:
+
+#### Dominicks Price residuals leaf1
+
+```{r}
+set.seed(69)
+selcindex=sample(seq_len(nrow(doml1)),size=(0.5*nrow(doml1)),replace = FALSE)
+doml1Train=doml1[selcindex,]
+doml1Test=doml1[-selcindex,]
+formPricedoml1= logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+PriceDoml1MTrain=model.matrix(formPricedoml1,data=doml1Train)
+PriceDoml1MTest=model.matrix(formPricedoml1,data=doml1Test)
+PriceDoml1DM=xgb.DMatrix(data=PriceDoml1MTrain, label=doml1Train$logprice)
+crossvPdoml1=xgb.cv(data=PriceDoml1DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPDoml1=xgboost(data=PriceDoml1DM, nrounds=102, print_every_n = 150)
+predictedPDoml1=predict(XGBPDoml1,newdata=PriceDoml1MTest)
+residualsPDoml1=doml1Test$logprice-predictedPDoml1
+```
+
+#### Dominicks Price residuals leaf2
+
+```{r}
+set.seed(69)
+selcindex=sample(seq_len(nrow(doml2)),size=(0.5*nrow(doml2)),replace = FALSE)
+doml2Train=doml2[selcindex,]
+doml2Test=doml2[-selcindex,]
+formPricedoml2= logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+PriceDoml2MTrain=model.matrix(formPricedoml2,data=doml2Train)
+PriceDoml2MTest=model.matrix(formPricedoml2,data=doml2Test)
+PriceDoml2DM=xgb.DMatrix(data=PriceDoml2MTrain, label=doml2Train$logprice)
+crossvPdoml2=xgb.cv(data=PriceDoml2DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPDoml2=xgboost(data=PriceDoml2DM, nrounds=154, print_every_n = 150)
+predictedPDoml2=predict(XGBPDoml2,newdata=PriceDoml2MTest)
+residualsPDoml2=doml2Test$logprice-predictedPDoml2
+```
+
+#### Dominicks Price residuals leaf 3
+
+```{r}
+set.seed(69)
+selcindex=sample(seq_len(nrow(doml3)),size=(0.5*nrow(doml3)),replace = FALSE)
+doml3Train=doml3[selcindex,]
+doml3Test=doml3[-selcindex,]
+formPricedoml3= logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+PriceDoml3MTrain=model.matrix(formPricedoml3,data=doml3Train)
+PriceDoml3MTest=model.matrix(formPricedoml3,data=doml3Test)
+PriceDoml3DM=xgb.DMatrix(data=PriceDoml3MTrain, label=doml3Train$logprice)
+crossvPdoml3=xgb.cv(data=PriceDoml3DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPDoml3=xgboost(data=PriceDoml3DM, nrounds=34, print_every_n = 150)
+predictedPDoml3=predict(XGBPDoml3,newdata=PriceDoml3MTest)
+residualsPDoml3=doml3Test$logprice-predictedPDoml3
+```
+#### Dominicks quantity residuals leaf 1
+
+```{r}
+set.seed(69)
+formMovedoml1= logmove ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+MoveDoml1MTrain=model.matrix(formMovedoml1,data=doml1Train)
+MoveDoml1MTest=model.matrix(formMovedoml1,data=doml1Test)
+MoveDoml1DM=xgb.DMatrix(data=MoveDoml1MTrain, label=doml1Train$logmove)
+crossvMovedoml1=xgb.cv(data=MoveDoml1DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBMoveDoml1=xgboost(data=MoveDoml1DM, nrounds=88, print_every_n = 150)
+predictedMoveDoml1=predict(XGBMoveDoml1,newdata=MoveDoml1MTest)
+residualsMoveDoml1=doml1Test$logmove-predictedMoveDoml1
+```
+
+#### Dominicks quantity residuals leaf 2
+
+```{r}
+set.seed(69)
+formMovedoml2= logmove ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+MoveDoml2MTrain=model.matrix(formMovedoml2,data=doml2Train)
+MoveDoml2MTest=model.matrix(formMovedoml2,data=doml2Test)
+MoveDoml2DM=xgb.DMatrix(data=MoveDoml2MTrain, label=doml2Train$logmove)
+crossvMovedoml2=xgb.cv(data=MoveDoml2DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBMoveDoml2=xgboost(data=MoveDoml2DM, nrounds=52, print_every_n = 150)
+predictedMoveDoml2=predict(XGBMoveDoml2,newdata=MoveDoml2MTest)
+residualsMoveDoml2=doml2Test$logmove-predictedMoveDoml2
+```
+
+#### Dominicks quantity residuals leaf 3
+
+```{r}
+set.seed(69)
+formMovedoml3= logmove ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+MoveDoml3MTrain=model.matrix(formMovedoml3,data=doml3Train)
+MoveDoml3MTest=model.matrix(formMovedoml3,data=doml3Test)
+MoveDoml3DM=xgb.DMatrix(data=MoveDoml3MTrain, label=doml3Train$logmove)
+crossvMovedoml3=xgb.cv(data=MoveDoml3DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBMoveDoml3=xgboost(data=MoveDoml3DM, nrounds=59, print_every_n = 150)
+predictedMoveDoml3=predict(XGBMoveDoml3,newdata=MoveDoml3MTest)
+residualsMoveDoml3=doml3Test$logmove-predictedMoveDoml3
+```
+
+#### Minute maid price leaf 1
+
+```{r}
+set.seed(69)
+selcindex=sample(seq_len(nrow(minl1)),size=(0.5*nrow(minl1)),replace = FALSE)
+minl1Train=minl1[selcindex,]
+minl1Test=minl1[-selcindex,]
+formPriceminl1= logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Priceminl1MTrain=model.matrix(formPriceminl1,data=minl1Train)
+Priceminl1MTest=model.matrix(formPriceminl1,data=minl1Test)
+Priceminl1DM=xgb.DMatrix(data=Priceminl1MTrain, label=minl1Train$logprice)
+crossvPminl1=xgb.cv(data=Priceminl1DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPminl1=xgboost(data=Priceminl1DM, nrounds=97, print_every_n = 150)
+predictedPminl1=predict(XGBPminl1,newdata=Priceminl1MTest)
+residualsPminl1=minl1Test$logprice-predictedPminl1
+```
+
+#### Minute maid price leaf 2
+
+```{r}
+set.seed(69)
+selcindex=sample(seq_len(nrow(minl2)),size=(0.5*nrow(minl2)),replace = FALSE)
+minl2Train=minl2[selcindex,]
+minl2Test=minl2[-selcindex,]
+formPriceminl2= logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Priceminl2MTrain=model.matrix(formPriceminl2,data=minl2Train)
+Priceminl2MTest=model.matrix(formPriceminl2,data=minl2Test)
+Priceminl2DM=xgb.DMatrix(data=Priceminl2MTrain, label=minl2Train$logprice)
+crossvPminl2=xgb.cv(data=Priceminl2DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPminl2=xgboost(data=Priceminl2DM, nrounds=150, print_every_n = 150)
+predictedPminl2=predict(XGBPminl2,newdata=Priceminl2MTest)
+residualsPminl2=minl2Test$logprice-predictedPminl2
+```
+
+#### Minute maid price leaf 3
+
+```{r}
+set.seed(69)
+selcindex=sample(seq_len(nrow(minl3)),size=(0.5*nrow(minl3)),replace = FALSE)
+minl3Train=minl3[selcindex,]
+minl3Test=minl3[-selcindex,]
+formPriceminl3= logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Priceminl3MTrain=model.matrix(formPriceminl3,data=minl3Train)
+Priceminl3MTest=model.matrix(formPriceminl3,data=minl3Test)
+Priceminl3DM=xgb.DMatrix(data=Priceminl3MTrain, label=minl3Train$logprice)
+crossvPminl3=xgb.cv(data=Priceminl3DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPminl3=xgboost(data=Priceminl3DM, nrounds=81, print_every_n = 150)
+predictedPminl3=predict(XGBPminl3,newdata=Priceminl3MTest)
+residualsPminl3=minl3Test$logprice-predictedPminl3
+```
+
+#### Minute maid quantity residuals leaf 1
+
+```{r}
+set.seed(69)
+formMoveminl1= logmove ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Moveminl1MTrain=model.matrix(formMoveminl1,data=minl1Train)
+Moveminl1MTest=model.matrix(formMoveminl1,data=minl1Test)
+Moveminl1DM=xgb.DMatrix(data=Moveminl1MTrain, label=minl1Train$logmove)
+crossvMoveminl1=xgb.cv(data=Moveminl1DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBMoveminl1=xgboost(data=Moveminl1DM, nrounds=157, print_every_n = 150)
+predictedMoveminl1=predict(XGBMoveminl1,newdata=Moveminl1MTest)
+residualsMoveminl1=minl1Test$logmove-predictedMoveminl1
+```
+
+#### Minute maid quantity residuals leaf 2
+
+```{r}
+set.seed(69)
+formMoveminl2= logmove ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Moveminl2MTrain=model.matrix(formMoveminl2,data=minl2Train)
+Moveminl2MTest=model.matrix(formMoveminl2,data=minl2Test)
+Moveminl2DM=xgb.DMatrix(data=Moveminl2MTrain, label=minl2Train$logmove)
+crossvMoveminl2=xgb.cv(data=Moveminl2DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBMoveminl2=xgboost(data=Moveminl2DM, nrounds=57, print_every_n = 150)
+predictedMoveminl2=predict(XGBMoveminl2,newdata=Moveminl2MTest)
+residualsMoveminl2=minl2Test$logmove-predictedMoveminl2
+```
+
+#### Minute maid quantity residuals leaf 3
+
+```{r}
+set.seed(69)
+formMoveminl3= logmove ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Moveminl3MTrain=model.matrix(formMoveminl3,data=minl3Train)
+Moveminl3MTest=model.matrix(formMoveminl3,data=minl3Test)
+Moveminl3DM=xgb.DMatrix(data=Moveminl3MTrain, label=minl3Train$logmove)
+crossvMoveminl3=xgb.cv(data=Moveminl3DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBMoveminl3=xgboost(data=Moveminl3DM, nrounds=60, print_every_n = 150)
+predictedMoveminl3=predict(XGBMoveminl3,newdata=Moveminl3MTest)
+residualsMoveminl3=minl3Test$logmove-predictedMoveminl3
+```
+#### Tropicana Price residuals leaf1
+
+```{r}
+set.seed(69)
+selcindex=sample(seq_len(nrow(trol1)),size=(0.5*nrow(trol1)),replace = FALSE)
+trol1Train=trol1[selcindex,]
+trol1Test=trol1[-selcindex,]
+formPricetrol1= logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Pricetrol1MTrain=model.matrix(formPricetrol1,data=trol1Train)
+Pricetrol1MTest=model.matrix(formPricetrol1,data=trol1Test)
+Pricetrol1DM=xgb.DMatrix(data=Pricetrol1MTrain, label=trol1Train$logprice)
+crossvPtrol1=xgb.cv(data=Pricetrol1DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPtrol1=xgboost(data=Pricetrol1DM, nrounds=474, print_every_n = 150)
+predictedPtrol1=predict(XGBPtrol1,newdata=Pricetrol1MTest)
+residualsPtrol1=trol1Test$logprice-predictedPtrol1
+```
+
+#### Tropicana Price residuals leaf 2
+
+```{r}
+set.seed(69)
+selcindex=sample(seq_len(nrow(trol2)),size=(0.5*nrow(trol2)),replace = FALSE)
+trol2Train=trol2[selcindex,]
+trol2Test=trol2[-selcindex,]
+formPricetrol2= logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Pricetrol2MTrain=model.matrix(formPricetrol2,data=trol2Train)
+Pricetrol2MTest=model.matrix(formPricetrol2,data=trol2Test)
+Pricetrol2DM=xgb.DMatrix(data=Pricetrol2MTrain, label=trol2Train$logprice)
+crossvPtrol2=xgb.cv(data=Pricetrol2DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPtrol2=xgboost(data=Pricetrol2DM, nrounds=140, print_every_n = 150)
+predictedPtrol2=predict(XGBPtrol2,newdata=Pricetrol2MTest)
+residualsPtrol2=trol2Test$logprice-predictedPtrol2
+```
+
+#### Tropicana Price residuals leaf 3
+
+```{r}
+set.seed(69)
+selcindex=sample(seq_len(nrow(trol3)),size=(0.5*nrow(trol3)),replace = FALSE)
+trol3Train=trol3[selcindex,]
+trol3Test=trol3[-selcindex,]
+formPricetrol3= logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Pricetrol3MTrain=model.matrix(formPricetrol3,data=trol3Train)
+Pricetrol3MTest=model.matrix(formPricetrol3,data=trol3Test)
+Pricetrol3DM=xgb.DMatrix(data=Pricetrol3MTrain, label=trol3Train$logprice)
+crossvPtrol3=xgb.cv(data=Pricetrol3DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBPtrol3=xgboost(data=Pricetrol3DM, nrounds=42, print_every_n = 150)
+predictedPtrol3=predict(XGBPtrol3,newdata=Pricetrol3MTest)
+residualsPtrol3=trol3Test$logprice-predictedPtrol3
+```
+
+#### Tropicana quantity residuals leaf 1
+
+```{r}
+set.seed(69)
+formMovetrol1= logmove ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Movetrol1MTrain=model.matrix(formMovetrol1,data=trol1Train)
+Movetrol1MTest=model.matrix(formMovetrol1,data=trol1Test)
+Movetrol1DM=xgb.DMatrix(data=Movetrol1MTrain, label=trol1Train$logmove)
+crossvMovetrol1=xgb.cv(data=Movetrol1DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBMovetrol1=xgboost(data=Movetrol1DM, nrounds=121, print_every_n = 150)
+predictedMovetrol1=predict(XGBMovetrol1,newdata=Movetrol1MTest)
+residualsMovetrol1=trol1Test$logmove-predictedMovetrol1
+```
+#### Tropicana quantity residuals leaf 2
+
+```{r}
+set.seed(69)
+formMovetrol2= logmove ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Movetrol2MTrain=model.matrix(formMovetrol2,data=trol2Train)
+Movetrol2MTest=model.matrix(formMovetrol2,data=trol2Test)
+Movetrol2DM=xgb.DMatrix(data=Movetrol2MTrain, label=trol2Train$logmove)
+crossvMovetrol2=xgb.cv(data=Movetrol2DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBMovetrol2=xgboost(data=Movetrol2DM, nrounds=138, print_every_n = 150)
+predictedMovetrol2=predict(XGBMovetrol2,newdata=Movetrol2MTest)
+residualsMovetrol2=trol2Test$logmove-predictedMovetrol2
+```
+
+#### Tropicana quantity residuals leaf 3
+
+```{r}
+set.seed(69)
+formMovetrol3= logmove ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3
+Movetrol3MTrain=model.matrix(formMovetrol3,data=trol3Train)
+Movetrol3MTest=model.matrix(formMovetrol3,data=trol3Test)
+Movetrol3DM=xgb.DMatrix(data=Movetrol3MTrain, label=trol3Train$logmove)
+crossvMovetrol3=xgb.cv(data=Movetrol3DM, nrounds = 1000, nfold=2, early_stopping_rounds = 150, print_every_n = 150)
+XGBMovetrol3=xgboost(data=Movetrol3DM, nrounds=43, print_every_n = 150)
+predictedMovetrol3=predict(XGBMovetrol3,newdata=Movetrol3MTest)
+residualsMovetrol3=trol3Test$logmove-predictedMovetrol3
+```
+##### Dominicks regressions
+
+```{r}
+regdoml1=lm(predictedMoveDoml1~residualsPDoml1+residualsPminl1+residualsPtrol1)
+regdoml2=lm(predictedMoveDoml2~residualsPDoml2+residualsPminl2+residualsPtrol2)
+regdoml3=lm(predictedMoveDoml3~residualsPDoml3+residualsPminl3+residualsPtrol3)
+```
+
+##### Minute maid regressions
+
+```{r}
+regminl1=lm(predictedMoveminl1~residualsPDoml1+residualsPminl1+residualsPtrol1)
+regminl2=lm(predictedMoveminl2~residualsPDoml2+residualsPminl2+residualsPtrol2)
+regminl3=lm(predictedMoveminl3~residualsPDoml3+residualsPminl3+residualsPtrol3)
+```
+
+##### Tropicana regressions
+
+```{r}
+regtrol1=lm(predictedMovetrol1~residualsPDoml1+residualsPminl1+residualsPtrol1)
+regtrol2=lm(predictedMovetrol2~residualsPDoml2+residualsPminl2+residualsPtrol2)
+regtrol3=lm(predictedMovetrol3~residualsPDoml3+residualsPminl3+residualsPtrol3)
+```
+
+#### Leaf 1 Matrix:
+
+```{r}
+cmat=matrix(coef(regdoml1),nrow=1)
+cmat=rbind(cmat,coef(regminl1))
+cmat=rbind(cmat,coef(regtrol1))
+cmat=cmat[,-1]
+rownames(cmat)=c("LnPriceDom","LnPriceMin","LnPriceTro")
+cmat
+```
+#### Leaf 2 Matrix:
+
+```{r}
+cmat=matrix(coef(regdoml2),nrow=1)
+cmat=rbind(cmat,coef(regminl2))
+cmat=rbind(cmat,coef(regtrol2))
+cmat=cmat[,-1]
+rownames(cmat)=c("LnPriceDom","LnPriceMin","LnPriceTro")
+cmat
+```
+
+#### Leaf 3 Matrix:
+
+```{r}
+cmat=matrix(coef(regdoml3),nrow=1)
+cmat=rbind(cmat,coef(regminl3))
+cmat=rbind(cmat,coef(regtrol3))
+cmat=cmat[,-1]
+rownames(cmat)=c("LnPriceDom","LnPriceMin","LnPriceTro")
+cmat
+```
+### c
+
+We compare XGBOOST with OLS for leaf 1 dominicks regression.
+```{r}
+#Using OLS to get price residuals
+onec=lm(logprice ~ logmove_tropicana_lag_1+logprice_tropicana_lag_1+feat_tropicana_lag_1+logmove_minute.maid_lag_1+logprice_minute.maid_lag_1+feat_minute.maid_lag_1+logmove_dominicks_lag_1+logprice_dominicks_lag_1+feat_dominicks_lag_1+logmove_tropicana_lag_2+logprice_tropicana_lag_2+feat_tropicana_lag_2+logmove_minute.maid_lag_2+logprice_minute.maid_lag_2+feat_minute.maid_lag_2+logmove_dominicks_lag_2+logprice_dominicks_lag_2+feat_dominicks_lag_2+logmove_tropicana_lag_3+logprice_tropicana_lag_3+feat_tropicana_lag_3+logmove_minute.maid_lag_3+logprice_minute.maid_lag_3+feat_minute.maid_lag_3+logmove_dominicks_lag_3+logprice_dominicks_lag_3+feat_dominicks_lag_3,data=doml1Train)
+predonec=predict(onec,newdata=doml1Test)
+resdonec=doml1Test$logprice-predonec
+
+```
+
+```{r}
+#Plotting residuals
+plot(predict(onec), resid(onec), main = "Scatter Plot of OLS Residuals", 
+     xlab = "Independent Variable", ylab = "Residuals")
+
+plot(predictedPDoml1,residualsPDoml1 , main = "Scatter Plot of XGBOOST Residuals", 
+     xlab = "Independent Variable", ylab = "Residuals")
+
+```
+FOR XGBOOST rediduals are much closer to 0 so it preforms better.
+
+## Question 2
+
+### a
+They make 10 per user => price of high is 15
+N=1mil, a=0.3, b=0, $$m_l$$=0, $$p_h$$=10
+```{r}
+Revenue=((1000000*0.3*0.5))*10*(12-2)
+Revenue
+```
+
+### b
+
+```{r}
+Costs=(1000000*0.3)*0.5*12
+Costs
+```
+
+### c
+
+```{r}
+ProfitNoFix=Revenue-Costs
+ProfitNoFix
+ProfitFix=Revenue-Costs-1000000
+ProfitFix
+```
+
+### d
+
+Since new revenue is less than the previous one they should not implement this change.
+```{r}
+NewRevenue=1000000*0.28*0.45*10*(12-1)
+NewCosts=1000000*0.28*0.5*12
+NewGrossMarg=NewRevenue-NewCosts
+NewGrossMarg
+```
+## Question 3
+
+#### Reading data
+
+```{r}
+ordata=read.xlsx("/Users/dans/Desktop/ECON/online_retail.xlsx")
+ordata$InvoiceDate=convertToDate(ordata$InvoiceDate)
+```
+
+#### Manipulating data
+
+```{r}
+orders=ordata
+orders$Revenue=orders$UnitPrice*orders$Quantity
+orders <- orders %>%
+  group_by(InvoiceNo,InvoiceDate,CustomerID,Country) %>%
+  mutate(OrderTotal = sum(Revenue))
+cleared <- orders %>%
+  distinct(InvoiceNo,InvoiceDate,CustomerID,Country,OrderTotal)
+#Removing rows with no customerID
+cleared=cleared[!is.na(cleared$CustomerID),]
+```
+
+### a Summary statistics:
+
+#### Unique customers:
+```{r}
+custID=cleared$CustomerID
+NumUniqueCust=length((unique(custID)))
+NumUniqueCust
+```
+
+#### Unique countries: 
+```{r}
+contrID=cleared$Country
+NumUniqueCountr=length((unique(contrID)))
+NumUniqueCountr
+```
+
+#### Total Revenue for each country:
+```{r}
+countrytot=cleared%>% 
+  group_by(Country) %>%
+  summarize(Total_Revenue=sum(OrderTotal))
+countrytot
+```
+
+#### Total revenue per customer:
+```{r}
+custtot=cleared%>% 
+  group_by(CustomerID) %>%
+  summarize(Total_Revenue=sum(OrderTotal))
+custtot
+```
+
+#### Average per country:
+
+```{r}
+countryavg=cleared%>% 
+  group_by(Country) %>%
+  summarize(Average_Revenue=mean(OrderTotal))
+countryavg
+```
+
+#### Average per customer:
+
+```{r}
+custavg=cleared%>% 
+  group_by(CustomerID) %>%
+  summarize(Average_Revenue=mean(OrderTotal))
+custavg
+```
+
+#### Average per customer in each country:
+
+```{r}
+contrcustavg=cleared%>% 
+  group_by(Country,CustomerID) %>%
+  summarize(Average_Revenue=mean(OrderTotal))
+contrcustavg
+```
+
+### (b) 
+
+#### Ploting average per customer:
+
+```{r}
+ggplot(custavg, aes(x=Average_Revenue)) + 
+    geom_histogram(aes(y=..density..),      # Histogram with density instead of count on y-axis
+                   binwidth=.1,
+                   colour="black", fill="white") +
+    geom_density(alpha=.2, fill="#FF6666")  # Overlay with transparent density plot
+```
+#### Ploting total per customer:
+
+```{r}
+ggplot(custtot, aes(x=Total_Revenue)) + 
+    geom_histogram(aes(y=..density..),      # Histogram with density instead of count on y-axis
+                   binwidth=.1,
+                   colour="black", fill="white") +
+    geom_density(alpha=.2, fill="#FF6666")  # Overlay with transparent density plot
+```
+
+### c
+
+```{r}
+#Sorting data in descending order
+sortot=custtot[order(-custtot$Total_Revenue),]
+sortot$cumilative_sum=cumsum(sortot$Total_Revenue)
+eightyperc=which(sortot$cumilative_sum>=0.8*sum(sortot$Total_Revenue))[1]
+eightyperc
+```
+
+
+
+### d
+
+```{r}
+df=cleared
+# Convert 'invoice_date' to a date type if it's not already
+df$invoice_date <- as.Date(df$InvoiceDate)
+
+df <- df %>% filter(!grepl("^C", InvoiceNo, ignore.case = TRUE))
+# Sort the data frame by 'customerID' and 'invoice_date'
+df <- df %>% arrange(CustomerID, InvoiceDate)
+
+# Create a new column 'next_invoice_date' with the next invoice date for each customer
+df <- df %>% group_by(CustomerID) %>% mutate(next_invoice_date = lead(InvoiceDate))
+
+# If you want to calculate the time difference between consecutive invoices, you can also create a 'time_difference' column
+df <- df %>% mutate(time_difference = next_invoice_date - invoice_date)
+
+df <- df %>% mutate(Month = format(invoice_date, "%Y-%m"))
+
+# Count unique customers in each month
+unique_customers_per_month <- df %>% group_by(Month) %>% summarise(unique_customers = n_distinct(CustomerID))
+
+# Identify churners for each month (assuming churners are customers with a time_difference more than 3 months)
+churners_per_month <- df %>%
+  group_by(Month) %>%
+  summarise(churners = sum(is.na(time_difference) | abs(time_difference) > 90))
+
+UniqueANDChurners <- merge(unique_customers_per_month, churners_per_month, by = "Month", all.x = TRUE)
+
+UniqueANDChurners$churn_rate=UniqueANDChurners$churners/UniqueANDChurners$unique_customers
+UniqueANDChurners <- UniqueANDChurners[-nrow(UniqueANDChurners), ]
+UniqueANDChurners
+
+df$Churner <- ifelse(is.na(df$time_difference) | abs(df$time_difference) > 90, 1, 0)
+
+df$BoughtAgain <- ifelse(abs(df$time_difference) > 90, 1, 0)
+
+returned=sum(df$BoughtAgain == 1, na.rm = TRUE)
+numchurn=sum(UniqueANDChurners$churners)
+returned/numchurn
+
+chrate=mean(UniqueANDChurners$churn_rate)
+chrate
+```
+### e
+
+```{r}
+10/chrate
+```
+
+### f
+```{r}
+returns=cleared[cleared$OrderTotal<0,]
+percreturned=sum(cleared$OrderTotal<0)/sum(cleared$OrderTotal>0)
+percreturned
+percrevreturned=abs(sum(cleared$OrderTotal[cleared$OrderTotal<0])/sum(cleared$OrderTotal[cleared$OrderTotal>0]))
+percrevreturned
+```
+
+## Question 4
+
+### a
+
+```{r}
+cleared <- cleared %>%
+  mutate(day = format(InvoiceDate, "%d"),
+         month = format(InvoiceDate, "%m"),
+         year = format(InvoiceDate, "%Y"))
+
+mean_revenue_per_day <- cleared %>%
+  group_by(day) %>%
+  summarise(mean_revenue = mean(OrderTotal, na.rm = TRUE))
+
+mean_revenue_per_month <- cleared %>%
+  group_by(month) %>%
+  summarise(mean_revenue = mean(OrderTotal, na.rm = TRUE))
+
+mean_revenue_per_year <- cleared %>%
+  group_by(year) %>%
+  summarise(mean_revenue = mean(OrderTotal, na.rm = TRUE))
+
+mean_revenue_per_day
+mean_revenue_per_month
+mean_revenue_per_year
+```
+
+### b
+
+```{r}
+#For each day
+ ggplot(mean_revenue_per_day, aes(x = day, y = mean_revenue)) +
+  geom_point() +
+  labs(title = "Mean Revenue for each day of month",
+       x = "Day",
+       y = "Revenue")
+
+ggplot(mean_revenue_per_month, aes(x = month, y = mean_revenue)) +
+  geom_point() +
+  labs(title = "Mean Revenue for each month",
+       x = "Month",
+       y = "Revenue")
+
+ggplot(mean_revenue_per_year, aes(x = year, y = mean_revenue)) +
+  geom_point() +
+  labs(title = "Mean Revenue for each Year",
+       x = "Year",
+       y = "Revenue")
+
+```
+
+### c
+
+I would disagree because it might be that holidays themsleves cause spikes in sales.
+
+## Question 5
+
+### a
+```{r}
+FirstOrder= cleared %>%
+  group_by(CustomerID) %>%
+  summarize(first_order_date = min(InvoiceDate))
+cleared=left_join(cleared,FirstOrder,by="CustomerID")
+cleared$first_order_date=format(cleared$first_order_date, "%Y-%m")
+
+```
+
+### b
+
+```{r}
+FIVEa=cleared%>% 
+  group_by(first_order_date) %>%
+  summarize(MeanOrderTotal=mean(OrderTotal),
+            OrderCount=sum(OrderTotal>0),
+            ReturnCount=sum(OrderTotal<0),
+            TotalOrderValue=sum(OrderTotal[OrderTotal>0]),
+            TotalreturnValue=sum(OrderTotal[OrderTotal<0]),
+            RealOrderValue=sum(OrderTotal)
+            
+            
+            )
+FIVEa
+```
+### c
+
+We can see that there was a peak of Revenue at the start date and during the 2 month trial, after it dropped. If we introduced low level of subscription some of those users might be retained. 

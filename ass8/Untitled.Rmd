@@ -1,0 +1,119 @@
+---
+title: "Assignment8"
+author: "Dans Lismanis"
+date: "2023-11-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(openxlsx)
+library(xgboost)
+
+library(glmnet)
+library(rpart)
+library(maptree)
+library(data.table)
+library(janitor)
+library(broom)
+library(knitr)
+library(tidyverse)
+library(dplyr)
+set.seed(69)
+```
+
+## Importing data:
+```{r}
+oj <- read.csv('/Users/dans/Desktop/ECON/ass4/oj.csv')
+oj$price=log(oj$price)
+```
+
+## Question 1:
+### Creating interaction terms:
+```{r}
+oj$PriceFeat=oj$price*oj$feat
+oj$PriceEDU=oj$price*oj$EDUC
+oj$PriceIncome=oj$price*oj$INCOME
+oj$PriceHHLarge=oj$price*oj$HHLARGE
+```
+### Creating Lags
+```{r}
+ojlag=oj
+ojla2=oj
+ojlag$week=ojlag$week+1
+ojla2$week=ojlag$week+2
+ojLAG=merge(oj,ojlag, by=c("brand","store","week"))
+ojLAG2=merge(ojLAG,ojla2, by=c("brand","store","week"))
+
+```
+### Renames columns in dataframe
+```{r}
+
+library(dplyr)
+
+# Assuming df is your dataframe
+
+# Get the column names
+col_names <- names(ojLAG2)
+
+# Identify columns with ".x" suffix
+current_cols <- grep("\\.x$", col_names, value = TRUE)
+
+# Identify columns with ".y" suffix
+lag1_cols <- grep("\\.y$", col_names, value = TRUE)
+
+# Identify columns with no suffix
+lag2_cols <- setdiff(col_names, c(current_cols, lag1_cols, "store", "brand", "week"))
+
+# Create a new set of column names
+new_col_names <- c(
+  "brand", "store", "week",
+  paste0(sub("\\.x$", "", current_cols), "_current"),
+  paste0(sub("\\.y$", "", lag1_cols), "_lag1"),
+  paste0(lag2_cols, "_lag2")
+)
+
+# Rename the columns
+ojLAG2 <- ojLAG2 %>%
+  rename(!!!setNames(col_names, new_col_names))
+
+```
+
+### Fiting a tree to data, assigning leafs to each store:
+```{r}
+categorytree<-rpart(as.formula(logmove_current ~ .),data=ojLAG2,method="anova",cp=0.05)
+draw.tree(categorytree)
+
+```
+```{r}
+ojleafs=ojLAG2
+ojleafs$leaf = categorytree$where
+```
+
+
+### Seperating leafs as unique data sets
+```{r}
+leaf1=ojleafs[ojleafs$leaf==3,]
+leaf2=ojleafs[ojleafs$leaf==4,]
+leaf3=ojleafs[ojleafs$leaf==5,]
+```
+
+### Seperating each brand as new dataset:
+```{r}
+l1dom=leaf1[leaf1$brand=='dominicks',]
+l1min=leaf1[leaf1$brand=="minute.maid",]
+l1tro=leaf1[leaf1$brand=="tropicana",]
+
+l2dom=leaf2[leaf2$brand=='dominicks',]
+l2min=leaf2[leaf2$brand=="minute.maid",]
+l2tro=leaf2[leaf2$brand=="tropicana",]
+
+l3dom=leaf3[leaf3$brand=='dominicks',]
+l3min=leaf3[leaf3$brand=="minute.maid",]
+l3tro=leaf3[leaf3$brand=="tropicana",]
+```
+### Adding cross prices:
+
+```{r}
+ordata=read.xlsx("/Users/dans/Desktop/ECON/online_retail.xlsx")
+ordata$InvoiceDate=convertToDate(ordata$InvoiceDate)
+```

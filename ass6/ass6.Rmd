@@ -1,0 +1,85 @@
+---
+title: "Assignment6"
+author: "Dans Lismanis"
+date: "2023-11-07"
+output: html_document
+---
+
+```{r setup}
+library(randomForest) 
+library(dplyr)
+library(ggplot2)
+library(xgboost)
+mydata=read.csv('/Users/dans/Desktop/ECON/econass3/oj.csv')
+set.seed(69)
+```
+
+## Question 1
+
+### a
+
+```{r}
+mydata$price <- log(mydata$price) 
+oj.rf <- randomForest(logmove ~ ., data = mydata, ntree = 	100, keep.forest = TRUE) 
+mydata$pred_logmove_rf = predict(oj.rf) 
+mydata$resid2 <- 	(mydata$logmove - mydata$pred_logmove_rf)^2 
+```
+
+### b
+```{r}
+ggplot(mydata, aes(x = logmove, y = pred_logmove_rf)) +
+  geom_point() +
+  labs(x = "Actual logmove", y = "predicted") +
+  ggtitle("Observed vs Predicted")
+```
+
+### c)
+```{r}
+MSErandTree=mean(mydata$resid2)
+MSErandTree
+```
+
+This MSE is much lower than the 0.45 we had for LASSO.
+
+## Question 2
+
+### b)
+```{r}
+
+selcindex=sample(seq_len(nrow(mydata)),size=(0.8*nrow(mydata)),replace = FALSE)
+train=mydata[selcindex,]
+test=mydata[-selcindex,]
+```
+
+### c)
+
+#### i)
+
+```{r}
+form= logmove ~ price + feat + AGE60 + EDUC + ETHNIC + INCOME + HHLARGE + WORKWOM + HVAL150 + SSTRDIST + SSTRVOL + CPDIST5 + CPWVOL5
+trainm=model.matrix(form, data=train)
+testm=model.matrix(form, data=test)
+train_dm=xgb.DMatrix(data=trainm, label=train$logmove)
+test_dm=xgb.DMatrix(data=testm, label=test$logmove)
+```
+
+#### ii + iii)
+
+```{r}
+crossv=xgb.cv(data=train_dm, nrounds = 500, nfold=5, early_stopping_rounds = 50, print_every_n = 20)
+```
+Now to get MSE we square these: MSEtrain=0.3306, MSEtest=0.3953. Which are lower then the previous models.
+
+#### iv)
+
+```{r}
+fullxgboostTRAIN=xgboost(data=train_dm, nrounds=50, print_every_n = 20)
+```
+#### v)
+
+```{r}
+MSExbgTEST=mean((predict(fullxgboostTRAIN, newdata=test_dm)-test$logmove)^2)
+MSExbgTEST
+```
+
+The MSE of the testing set in larger than the cross validated MSE of training data, but this is to be expected as this is out of sample. When comparing to previous models of testing data it is lower.
